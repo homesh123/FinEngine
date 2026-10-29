@@ -1,0 +1,21 @@
+# TradeSagar
+
+> TradeSagar (https://app.forex24hr.com/) is a free, browser-based live trading chart app from forex24hr.com (https://forex24hr.com/). It shows live forex, gold, silver, crypto and index charts with order-flow tools, chart patterns, an economic calendar, alerts and statistical next-candle odds. No download or sign-up is needed to view charts.
+
+Key facts:
+- Owner: forex24hr.com (forex market-hours clock). Contact: https://forex24hr.com/contact/
+- Free to use, including the Order Flow (footprint) chart and chart patterns; extra Pro tools: Pressure chart, email/webhook alerts and Pro indicators.
+- Chart types: candles, Heikin-Ashi, line, OHLC, Order Flow (footprint), Pressure chart.
+- Indicators: RSI, MACD, VWAP, Bollinger Bands, Market Profile, supply/demand and smart-money (SMC) zones, London Breakout, Gold Move, multi-timeframe interest meter.
+- Chart patterns: harmonic (Gartley, Bat, Butterfly, Crab, Cypher), head and shoulders, double top/bottom, triangles, wedges, flags, cup and handle.
+- Next-candle projection and a trained prediction model that show their own past accuracy.
+- Market context: economic calendar, CFTC trader positioning, retail sentiment.
+- Alerts by pop-up and sound (email and webhook in Pro); drawing tools; screenshots and shareable chart links.
+- Educational use only, not financial advice.
+
+## Pages
+- [Charts (app)](https://app.forex24hr.com/): the live chart app
+- [About](https://app.forex24hr.com/about.html): what TradeSagar is and its features
+- [Disclaimer](https://app.forex24hr.com/disclaimer.html): risk warning and terms of use
+- [Privacy Policy](https://app.forex24hr.com/privacy.html): data handling for forex24hr.com and app.forex24hr.com
+- [forex24hr.com](https://forex24hr.com/): parent site — live forex market hours and sessions
