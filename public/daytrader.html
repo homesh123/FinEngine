@@ -136,6 +136,7 @@ import json
 import pandas as pd
 from datetime import datetime
 import time as pytime
+from pyodide.ffi import create_proxy
 
 # ---------- UI refs ----------
 log_div = js.document.getElementById("log-content")
@@ -492,11 +493,11 @@ def init():
     btn_us = js.document.getElementById("btn-screen-us")
     btn_clear = js.document.getElementById("btn-clear")
     if btn_in:
-        btn_in.addEventListener("click", js.create_proxy(on_screen_in))
+        btn_in.addEventListener("click", create_proxy(on_screen_in))
     if btn_us:
-        btn_us.addEventListener("click", js.create_proxy(on_screen_us))
+        btn_us.addEventListener("click", create_proxy(on_screen_us))
     if btn_clear:
-        btn_clear.addEventListener("click", js.create_proxy(on_clear))
+        btn_clear.addEventListener("click", create_proxy(on_clear))
 
 init()
 
