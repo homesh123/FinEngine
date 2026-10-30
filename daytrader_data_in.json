@@ -1,0 +1,17 @@
+[
+  {"symbol": "RELIANCE.NS", "price": 1191.6, "change_pct": -0.5, "roe": 8.93, "revenue_growth": 29.7, "f_score": 6, "label": "BUY", "label_color": "green", "sector": "Energy", "currency_symbol": "₹", "reasons": ["ROE strong"]},
+  {"symbol": "TCS.NS", "price": 2105.0, "change_pct": 0.2, "roe": 47.74, "revenue_growth": 13.9, "f_score": 5, "label": "HOLD", "label_color": "amber", "sector": "Technology", "currency_symbol": "₹", "reasons": ["Stable"]},
+  {"symbol": "HDFCBANK.NS", "price": 704.5, "change_pct": -0.3, "roe": 13.84, "revenue_growth": 16.6, "f_score": 5, "label": "BUY", "label_color": "green", "sector": "Financial", "currency_symbol": "₹", "reasons": ["Value"]},
+  {"symbol": "INFY.NS", "price": 1013.35, "change_pct": 0.1, "roe": 32.0, "revenue_growth": 2.9, "f_score": 5, "label": "HOLD", "label_color": "amber", "sector": "Technology", "currency_symbol": "₹", "reasons": ["Stable"]},
+  {"symbol": "HINDUNILVR.NS", "price": 1865.5, "change_pct": -0.2, "roe": 30.86, "revenue_growth": 5.0, "f_score": 6, "label": "BUY", "label_color": "green", "sector": "Consumer", "currency_symbol": "₹", "reasons": ["Strong brand"]},
+  {"symbol": "ICICIBANK.NS", "price": 1331.7, "change_pct": 0.4, "roe": 16.07, "revenue_growth": 11.4, "f_score": 5, "label": "BUY", "label_color": "green", "sector": "Financial", "currency_symbol": "₹", "reasons": ["Growth"]},
+  {"symbol": "SBIN.NS", "price": 456.7, "change_pct": 0.8, "roe": 12.5, "revenue_growth": 15.2, "f_score": 5, "label": "BUY", "label_color": "green", "sector": "Financial", "currency_symbol": "₹", "reasons": ["Value"]},
+  {"symbol": "BHARTIARTL.NS", "price": 1123.4, "change_pct": 1.2, "roe": 18.3, "revenue_growth": 18.7, "f_score": 6, "label": "BUY", "label_color": "green", "sector": "Telecom", "currency_symbol": "₹", "reasons": ["Growth"]},
+  {"symbol": "ITC.NS", "price": 245.6, "change_pct": -0.1, "roe": 24.2, "revenue_growth": 7.3, "f_score": 6, "label": "HOLD", "label_color": "amber", "sector": "Consumer", "currency_symbol": "₹", "reasons": ["Defensive"]},
+  {"symbol": "KOTAKBANK.NS", "price": 987.3, "change_pct": 0.3, "roe": 15.1, "revenue_growth": 14.8, "f_score": 5, "label": "BUY", "label_color": "green", "sector": "Financial", "currency_symbol": "₹", "reasons": ["Quality"]},
+  {"symbol": "LT.NS", "price": 1543.2, "change_pct": -0.4, "roe": 16.8, "revenue_growth": 21.3, "f_score": 6, "label": "BUY", "label_color": "green", "sector": "Infrastructure", "currency_symbol": "₹", "reasons": ["Capex cycle"]},
+  {"symbol": "ASIANPAINT.NS", "price": 2345.8, "change_pct": -0.7, "roe": 28.4, "revenue_growth": 8.9, "f_score": 6, "label": "HOLD", "label_color": "amber", "sector": "Consumer", "currency_symbol": "₹", "reasons": ["Premium"]},
+  {"symbol": "AXISBANK.NS", "price": 654.2, "change_pct": 0.5, "roe": 14.2, "revenue_growth": 16.9, "f_score": 5, "label": "BUY", "label_color": "green", "sector": "Financial", "currency_symbol": "₹", "reasons": ["Improving"]},
+  {"symbol": "BAJFINANCE.NS", "price": 6789.5, "change_pct": 0.6, "roe": 19.7, "revenue_growth": 31.2, "f_score": 6, "label": "BUY", "label_color": "green", "sector": "Financial", "currency_symbol": "₹", "reasons": ["Growth"]},
+  {"symbol": "HCLTECH.NS", "price": 1234.6, "change_pct": 0.3, "roe": 23.1, "revenue_growth": 10.8, "f_score": 5, "label": "BUY", "label_color": "green", "sector": "Technology", "currency_symbol": "₹", "reasons": ["Value"]}
+]
