@@ -12,8 +12,30 @@
   <py-config>
     packages = ["pandas"]
   </py-config>
+  <style>
+    #pyscript-loading {
+      position: fixed; inset: 0; z-index: 50;
+      background: #0f1026; color: #fff;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+    }
+    #pyscript-loading.hidden { display: none; }
+    .pulse-dot { width: 8px; height: 8px; background: #10b981; border-radius: 50%;
+      animation: pulse 1.5s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+  </style>
 </head>
 <body class="min-h-screen bg-slate-50 dark:bg-darkbg text-slate-900 dark:text-slate-200 font-sans">
+
+  <!-- PyScript loading overlay -->
+  <div id="pyscript-loading">
+    <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-emerald-500 mb-4"></div>
+    <h2 class="text-lg font-bold mb-2">Initializing Python (PyScript)…</h2>
+    <p class="text-sm text-slate-400 mb-6">Downloading PyScript runtime + pandas. First load takes ~20-40 seconds.</p>
+    <div class="flex gap-2">
+      <div class="pulse-dot"></div><div class="pulse-dot" style="animation-delay:.2s"></div><div class="pulse-dot" style="animation-delay:.4s"></div>
+    </div>
+    <p class="text-xs text-slate-500 mt-6">Once loaded, click "Screen" to fetch live stock data from Yahoo Finance.</p>
+  </div>
 
   <!-- Header -->
   <header class="border-b border-slate-200 dark:border-borderdark bg-white dark:bg-cardbg sticky top-0 z-20">
@@ -28,7 +50,7 @@
       <div class="flex items-center gap-2 px-4 py-2 border border-slate-200 dark:border-borderdark rounded-full bg-white dark:bg-cardbg text-sm">
         <span id="status-indicator" class="flex items-center gap-1 text-emerald-600 dark:text-emerald-400 text-xs font-medium">
           <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-          Ready
+          PyScript loading…
         </span>
       </div>
     </div>
@@ -86,7 +108,7 @@
           </tbody>
         </table>
       </div>
-      <p id="no-results" class="p-4 text-center text-slate-500 dark:text-slate-400 text-sm">No results yet. Click "Screen" to load live stock data.</p>
+      <p id="no-results" class="p-4 text-center text-slate-500 dark:text-slate-400 text-sm">No results yet. Wait for PyScript to load, then click "Screen".</p>
     </div>
 
     <!-- Log -->
@@ -113,6 +135,18 @@ import asyncio
 import json
 import pandas as pd
 from datetime import datetime
+import time as pytime
+from pyodide.ffi import create_proxy
+
+# ---------- UI refs ----------
+log_div = js.document.getElementById("log-content")
+results_body = js.document.getElementById("results-body")
+results_panel = js.document.getElementById("results-panel")
+no_results = js.document.getElementById("no-results")
+status_indicator = js.document.getElementById("status-indicator")
+results_count = js.document.getElementById("results-count")
+results_title = js.document.getElementById("results-title")
+pyscript_loading = js.document.getElementById("pyscript-loading")
 
 # ---------- Stock universes ----------
 NIFTY_SYMBOLS = [
@@ -141,14 +175,7 @@ DEFAULT_CRITERIA = {
 CURRENCY = {"IN": "INR", "US": "USD"}
 CURRENCY_SYMBOL = {"INR": "₹", "USD": "$"}
 
-log_div = js.document.getElementById("log-content")
-results_body = js.document.getElementById("results-body")
-results_panel = js.document.getElementById("results-panel")
-no_results = js.document.getElementById("no-results")
-status_indicator = js.document.getElementById("status-indicator")
-results_count = js.document.getElementById("results-count")
-results_title = js.document.getElementById("results-title")
-
+# ---------- UI helpers ----------
 def log(msg):
     ts = datetime.now().strftime("%H:%M:%S")
     line = f"[{ts}] {msg}\n"
@@ -166,12 +193,25 @@ def set_status(text, kind="info"):
     else:
         status_indicator.className = "flex items-center gap-1 text-slate-600 dark:text-slate-400 text-xs font-medium"
 
+def show_log_panel():
+    js.document.getElementById("log-panel").classList.remove("hidden")
+
 # ---------- Yahoo Finance fetch via browser ----------
-async def yf_fetch(url):
-    resp = await js.fetch(url)
-    if not resp.ok:
-        return None
-    return await resp.json()
+async def yf_fetch(url, retries=3, backoff=2):
+    last_err = None
+    for attempt in range(retries):
+        try:
+            resp = await js.fetch(url)
+            if resp.ok:
+                return await resp.json()
+            else:
+                last_err = f"HTTP {resp.status}"
+        except Exception as e:
+            last_err = str(e)
+        if attempt < retries - 1:
+            await asyncio.sleep(backoff * (attempt + 1))
+    log(f"  fetch failed after {retries} tries: {last_err} :: {url}")
+    return None
 
 async def get_chart(symbol, range_="1mo", interval="1d"):
     url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range={range_}&interval={interval}"
@@ -221,27 +261,23 @@ def calculate_ta(rows):
     high = df["high"]
     low = df["low"]
 
-    # RSI (14)
     delta = close.diff()
     gain = delta.where(delta > 0, 0.0).rolling(window=14).mean()
     loss = (-delta.where(delta < 0, 0.0)).rolling(window=14).mean()
     rs = gain / loss
     rsi = 100 - (100 / (1 + rs))
 
-    # MACD
     exp1 = close.ewm(span=12, adjust=False).mean()
     exp2 = close.ewm(span=26, adjust=False).mean()
     macd = exp1 - exp2
     signal = macd.ewm(span=9, adjust=False).mean()
 
-    # ATR
     hl = high - low
     hc = (high - close.shift()).abs()
     lc = (low - close.shift()).abs()
     tr = pd.concat([hl, hc, lc], axis=1).max(axis=1)
     atr = tr.rolling(window=14).mean()
 
-    # SMAs
     sma20 = close.rolling(window=20).mean()
     sma50 = close.rolling(window=50).mean()
 
@@ -259,7 +295,6 @@ def calculate_ta(rows):
 
 # ---------- Fundamentals ----------
 def extract_fundamentals(summary, currency_code):
-    """Extract fundamental metrics from Yahoo quoteSummary."""
     def get_mod(module, *keys):
         m = summary.get(module, {})
         if not isinstance(m, dict):
@@ -283,12 +318,11 @@ def extract_fundamentals(summary, currency_code):
     sector = get_mod("assetProfile", "sector")
     analyst_count = get_mod("financialData", "numberOfAnalystOpinions")
 
-    # Convert fractions to percents where needed
     if roe is not None: roe = roe * 100
     if revenue_growth is not None: revenue_growth = revenue_growth * 100
     if earnings_growth is not None: earnings_growth = earnings_growth * 100
     if gross_margin is not None: gross_margin = gross_margin * 100
-    if debt_to_equity is not None: debt_to_equity = debt_to_equity / 100  # stored as percent in some APIs
+    if debt_to_equity is not None: debt_to_equity = debt_to_equity / 100
 
     return {
         "roe": roe,
@@ -305,43 +339,33 @@ def extract_fundamentals(summary, currency_code):
         "currency": currency_code,
     }
 
-# ---------- Piotroski F-Score (simplified from available fields) ----------
+# ---------- Piotroski F-Score (simplified) ----------
 def calculate_f_score(fundamentals, ta):
     score = 0
-    # Profitability: ROE > 0
     if fundamentals.get("roe") and fundamentals["roe"] > 0:
         score += 1
-    # Profitability: positive earnings growth
     if fundamentals.get("eps_growth") and fundamentals["eps_growth"] > 0:
         score += 1
-    # Efficiency: gross margin > 0
     if fundamentals.get("gross_margin") and fundamentals["gross_margin"] > 0:
         score += 1
-    # Leverage: low debt-to-equity
     d2e = fundamentals.get("debt_to_equity")
     if d2e is not None and d2e < 50:
         score += 1
-    # Trend: price above SMA20
     if ta and ta.get("close") and ta.get("sma20") and ta["close"] > ta["sma20"]:
         score += 1
-    # Momentum: RSI not overbought
     if ta and ta.get("rsi") and ta["rsi"] < 70:
         score += 1
-    return score  # out of 6 (simplified from 9 due to browser data limits)
+    return score
 
 def signal_label(fundamentals, ta, f_score):
     reasons = []
     score = 0
-    # Bullish: ROE > 15
     if fundamentals.get("roe") and fundamentals["roe"] > 15:
         score += 1; reasons.append("ROE strong")
-    # Bullish: revenue growth > 10
     if fundamentals.get("revenue_growth") and fundamentals["revenue_growth"] > 10:
         score += 1; reasons.append("Rev growth+")
-    # Bullish: F-score >= 4
     if f_score >= 4:
         score += 1; reasons.append("F-score OK")
-    # Bullish: price above SMA20
     if ta and ta.get("close") and ta.get("sma20") and ta["close"] > ta["sma20"]:
         score += 1; reasons.append("Above SMA20")
     if score >= 3:
@@ -360,6 +384,7 @@ async def screen_market(market):
     results_panel.classList.remove("hidden")
     no_results.classList.add("hidden")
     results_body.innerHTML = ""
+    show_log_panel()
     log(f"Starting live screen for {sym_label} ({len(symbols)} stocks) via Yahoo Finance...")
     set_status("Loading...", "loading")
 
@@ -400,9 +425,10 @@ async def screen_market(market):
         }
         results.append(row)
         log(f"  {symbol}: ${cp:.2f} | {label} | F={f_score}")
-
-        # Add row to DOM immediately
         add_result_row(row)
+
+        # Small delay between requests to avoid rate limiting
+        await asyncio.sleep(0.5)
 
     results.sort(key=lambda r: ({"BUY": 0, "WATCH": 1, "AVOID": 2}.get(r["label"], 9), -(r["roe"] or 0)))
 
@@ -441,7 +467,7 @@ def add_result_row(r):
     """
     results_body.insertAdjacentHTML("beforeend", html)
 
-# ---------- Event listeners (wired after DOM loads) ----------
+# ---------- Event listeners ----------
 async def on_screen_in(_):
     await screen_market("IN")
 
@@ -456,20 +482,23 @@ async def on_clear(_):
     set_status("Ready")
     log("Cleared.")
 
-# Wire up after PyScript is ready
 def init():
+    # Hide PyScript loading overlay once runtime is ready
+    pyscript_loading.classList.add("hidden")
+    set_status("Ready")
+    log("Day Trader desk initialized. PyScript runtime loaded.")
+    log("Click 'Screen' to fetch live stock data from Yahoo Finance.")
+
     btn_in = js.document.getElementById("btn-screen-in")
     btn_us = js.document.getElementById("btn-screen-us")
     btn_clear = js.document.getElementById("btn-clear")
     if btn_in:
-        btn_in.addEventListener("click", js.create_proxy(on_screen_in))
+        btn_in.addEventListener("click", create_proxy(on_screen_in))
     if btn_us:
-        btn_us.addEventListener("click", js.create_proxy(on_screen_us))
+        btn_us.addEventListener("click", create_proxy(on_screen_us))
     if btn_clear:
-        btn_clear.addEventListener("click", js.create_proxy(on_clear))
-    log("Day Trader desk initialized. Click a screen button to load live data.")
+        btn_clear.addEventListener("click", create_proxy(on_clear))
 
-# Run init
 init()
 
   </script>
