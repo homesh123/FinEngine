@@ -39,8 +39,20 @@ export async function testApiBase(url) {
     return true;
 }
 
+const LIVE_TIMEOUT_MS = 10000;
+
 export async function liveJson(path, init) {
-    const res = await fetch(`${getApiBase()}${path}`, { cache: 'no-store', ...init });
+    // A live server that doesn't answer must not leave the page loading: give up after 10 s
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), LIVE_TIMEOUT_MS);
+    let res;
+    try {
+        res = await fetch(`${getApiBase()}${path}`, { cache: 'no-store', signal: ctrl.signal, ...init });
+    } catch (e) {
+        throw new Error(e.name === 'AbortError' ? `the live data server didn't answer within ${LIVE_TIMEOUT_MS / 1000} s` : `can't reach the live data server (${e.message})`);
+    } finally {
+        clearTimeout(timer);
+    }
     const body = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(body.detail || `${path}: HTTP ${res.status}`);
     return body;
@@ -50,14 +62,24 @@ export async function snapshotJson(file) {
     const res = await fetch(`${DATA_BASE}/${file}`, { cache: 'no-store' });
     if (res.status === 404) throw new Error('No data snapshot yet — the "Deploy to GitHub Pages" workflow publishes it on its next run.');
     if (!res.ok) throw new Error(`${file}: HTTP ${res.status}`);
-    return res.json();
+    try {
+        return await res.json();
+    } catch {
+        throw new Error(`${file} isn't data (the site may be published from the branch instead of GitHub Actions: Settings → Pages → Source)`);
+    }
 }
 
-/** Live API when configured (falling back to the snapshot on any error), else the snapshot. */
-export async function getData(apiPath, file) {
+/**
+ * Live API when configured, else the snapshot. Falls back to the snapshot when the
+ * live call fails, times out, or answers something that isn't the data (isValid).
+ */
+export async function getData(apiPath, file, isValid = (b) => b && typeof b === 'object') {
     if (hasLiveApi() && apiPath) {
-        try { return { source: 'live', body: await liveJson(apiPath) }; }
-        catch (e) { console.warn(`Live API failed, using snapshot: ${e.message}`); }
+        try {
+            const body = await liveJson(apiPath);
+            if (isValid(body)) return { source: 'live', body };
+            console.warn('Live API answered without data, using the snapshot');
+        } catch (e) { console.warn(`Live API failed, using the snapshot: ${e.message}`); }
     }
     return { source: 'snapshot', body: await snapshotJson(file) };
 }

@@ -289,7 +289,8 @@ export default function InvestmentScreener({ market = 'IN', onSource }) {
         setLoading(true);
         setError(null);
         try {
-            const { source: src, body } = await getData(`/api/investment/screener?market=${market}`, `screener-${market}.json`);
+            const { source: src, body } = await getData(`/api/investment/screener?market=${market}`, `screener-${market}.json`,
+                b => Array.isArray(b?.data) && b.data.length > 0);
             setStocks((body.data || []).map(s => applyCriteria(s, crit)));
             setSnapshotAt(body.generated_at);
             setSource(src);

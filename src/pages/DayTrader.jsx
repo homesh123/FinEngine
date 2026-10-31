@@ -638,7 +638,7 @@ export default function DayTrader({ market = 'IN', onSource }) {
         setLoading(true);
         try {
             const { source: src, body } = await getData(market === 'IN' ? '/api/desk?market=IN' : '/api/desk',
-                market === 'IN' ? 'daytrader-IN.json' : 'daytrader.json');
+                market === 'IN' ? 'daytrader-IN.json' : 'daytrader.json', b => !!b?.scan);
             setDesk(body);
             setSource(src);
             onSource?.(src);
