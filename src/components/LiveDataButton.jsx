@@ -39,10 +39,10 @@ export default function LiveDataButton({ source }) {
     return (
         <div className="relative">
             <button onClick={() => setOpen(o => !o)} title={live ? `Live data from ${base}` : 'Using the published snapshot — click to connect live data'}
-                className={`flex items-center gap-1.5 h-8 px-2.5 rounded-lg border text-xs font-semibold ${live
+                className={`flex items-center justify-center gap-1.5 min-w-[44px] h-11 sm:h-8 px-2.5 rounded-lg border text-xs font-semibold ${live
                     ? 'border-green-300 text-green-700 bg-green-50 dark:border-green-500/40 dark:text-green-400 dark:bg-green-500/10'
                     : 'border-slate-200 dark:border-borderdark text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-surfacebg'}`}>
-                <Radio size={13} className={live ? 'animate-pulse' : ''} /> {live ? 'Live' : 'Snapshot'}
+                <Radio size={13} className={live ? 'animate-pulse' : ''} /><span className="hidden sm:inline">{live ? 'Live' : 'Snapshot'}</span>
             </button>
             {open && (
                 <div className="absolute right-0 top-10 z-50 w-[min(92vw,380px)] rounded-xl border border-slate-200 dark:border-borderdark bg-white dark:bg-cardbg shadow-xl p-4 text-sm">

@@ -298,6 +298,43 @@ with the exchange session as a parameter.
 snapshot is the fallback. Moving the API to another server: `deploy/forex24hr/README.md`, "Moving to a new
 server".
 
+## 6b. UX redesign (31 Oct)
+
+**Whole app**
+- One header for both pages: FinEngine, **Screener / Day Trader**, a single 🇮🇳 India / 🇺🇸 US switch
+  (India by default, shared by both pages; earlier per-page choices carry over), Live/Snapshot, theme.
+
+**Screener**
+- Summary tiles that double as filters: Pass my criteria / Buy now / Buy on dip / Watch / All.
+- A compact table you can sort by any column: price, signal, upside, margin of safety, ROE, F-Score, and trend
+  (50 / 200-day, RSI).
+- Click a stock for a detail panel (a bottom sheet on phones): chart, why, timing, analysts' target, holding
+  period, nine key numbers, and **TradingView**.
+
+**Day Trader:** the trade on one page instead of 7 tab clicks.
+- Breakouts list on the left; the selected trade on the right.
+- A step strip (Setup → Plan → Odds → Size → Risk → Order) that jumps to each section and is coloured by status.
+- Secondary tabs: News, Orders & alerts, Earnings and Congress (the last two US only).
+
+**TradingView:** charts open there (`NSE:` prefix for India, e.g. `NSE:M_M`; `BRK.B` for US class shares).
+
+**Paper orders:** kept per market ($ and ₹ books don't mix).
+
+**Apple Human Interface Guidelines**, checked by an automated phone audit:
+- Bottom tab bar for the two pages on phones, clear of the home indicator (`viewport-fit=cover`, safe-area padding).
+- Every control at least 44 × 44 pt on phones. The (i) icons stay small but have a 44 pt tap area, verified by
+  hit-testing.
+- No text under 11 px.
+- Visible keyboard focus; animations respect Reduce Motion.
+- A grabber on the bottom sheet.
+- One Watch control per trade instead of two; no truncated dropdowns.
+
+**Checked:**
+- No horizontal overflow at 390 px; no console errors.
+- Desktop and phone flows: filters, sorting, detail, search, re-plan (1R gives coin flip 29.1 / 25.7), size,
+  risk PASS, paper order, India switch (₹, 170 shares), market kept across pages, bottom tabs.
+- The "UI UX Pro Max" skill isn't installed in this environment; the review followed Apple's guidelines directly.
+
 ## 7. Commits on the branch
 
 | Commit | What |

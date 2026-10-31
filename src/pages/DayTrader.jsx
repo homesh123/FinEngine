@@ -32,7 +32,6 @@ const SKILLS = [
 
 const REFRESH_MS = 60000;
 const SETTINGS_KEY = 'dtSkillSettings';   // + '-IN' for the India desk (rupees)
-const MARKET_KEY = 'dtMarket';
 const TARGETS = ['1R', '1.5R', '2R', '3R'];
 const STOPS = [['or-mid', 'Range midpoint'], ['or-low', 'Range low']];
 
@@ -54,11 +53,13 @@ const INDIA_DEFAULTS = {   // scripts/market_desk.py IN_CONFIG: trader-budget's 
     budget: 100000, max_order_usd: 80000, min_order_usd: 100, max_loss_per_trade_usd: 1000, max_daily_loss_usd: 3000,
     no_entries_before: '09:30', no_entries_after: '15:00', flat_by: '15:25',
 };
+/** The Time Machine verdict's headline in a few words ("Strong · stop", "Coin flip"). */
+const shortVerdict = (v) => {
+    const head = String(v || '').split(':')[0];
+    const side = /target/.test(head) ? 'target' : /stop/.test(head) ? 'stop' : '';
+    return /^Strongly/.test(head) ? `Strong · ${side}` : /^Leans/.test(head) ? `Leans · ${side}` : /coin flip/.test(head) ? 'Coin flip' : /break-even/.test(head) ? 'Break-even' : head;
+};
 const nyClock = (asOf) => (asOf || '').slice(11, 16);   // "2026-10-19 10:15" → "10:15"
-
-function savedTheme() {
-    try { return JSON.parse(localStorage.getItem('chartState') || '{}').theme === 'light' ? 'light' : 'dark'; } catch { return 'dark'; }
-}
 
 const settingsKey = (m) => (m === 'IN' ? `${SETTINGS_KEY}-IN` : SETTINGS_KEY);
 
@@ -94,7 +95,7 @@ const Card = ({ children, className = '' }) => (
 
 const Stat = ({ label, value, tone = '' }) => (
     <div className="flex flex-col rounded-lg bg-slate-50 dark:bg-surfacebg px-3 py-2 min-w-0">
-        <span className="text-[10px] uppercase tracking-wide text-slate-500 dark:text-slate-400">{label}</span>
+        <span className="text-[11px] uppercase tracking-wide text-slate-500 dark:text-slate-400">{label}</span>
         <span className={`font-mono font-bold text-sm truncate ${tone || 'text-slate-800 dark:text-slate-100'}`}>{value}</span>
     </div>
 );
@@ -108,13 +109,14 @@ const ToolTag = ({ tool, engine }) => {
     const title = nse ? 'The skill’s rule on NSE hours (scripts/market_desk.py; checked to reproduce the skill on US data)'
         : engine === 'browser' ? 'Browser port of the skill’s rule (no live API connected)' : 'Output of the skill’s own tool';
     return (
-        <span className="ml-2 align-middle text-[10px] font-mono font-normal text-slate-400" title={title}>
+        <span className="ml-2 align-middle text-[11px] font-mono font-normal text-slate-400" title={title}>
             {tool}{nse ? ' · NSE port' : ''}{engine === 'browser' ? ' · browser' : ''}
         </span>
     );
 };
 
 function NextButton({ to, onGo, children }) {
+    if (!onGo) return null;     // inside the trade workspace every step is already on screen
     return (
         <button onClick={() => onGo(to)} className="mt-4 inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold">
             {children} <ArrowRight size={15} />
@@ -139,7 +141,7 @@ function Select({ label, value, onChange, options }) {
     return (
         <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600 dark:text-slate-300">
             {label}
-            <select value={value} onChange={e => onChange(e.target.value)} className="rounded-lg border border-slate-200 dark:border-borderdark bg-white dark:bg-surfacebg px-2.5 py-2 text-sm">
+            <select value={value} onChange={e => onChange(e.target.value)} className="min-w-[10.5rem] h-11 sm:h-auto rounded-lg border border-slate-200 dark:border-borderdark bg-white dark:bg-surfacebg px-2.5 py-2 text-sm">
                 {options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
             </select>
         </label>
@@ -163,7 +165,7 @@ function IntradayChart({ bars, date, plan, orHigh, orLow, height = 190 }) {
     const line = (v, col, label, dash) => v > 0 && (
         <g key={label}>
             <line x1="0" x2={W - padR} y1={y(v)} y2={y(v)} stroke={col} strokeDasharray={dash} strokeWidth="1" />
-            <text x={W - padR + 4} y={y(v) + 3} fontSize="10" fill={col}>{label}</text>
+            <text x={W - padR + 4} y={y(v) + 4} fontSize="11" fill={col}>{label}</text>
         </g>
     );
     return (
@@ -259,8 +261,8 @@ function NewsView({ desk, symbol, onGo }) {
                     {items.map(n => (
                         <li key={n.id}>
                             <div className="flex flex-wrap items-center gap-1.5 mb-0.5">
-                                <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${n.kind === 'headline' ? 'bg-slate-100 text-slate-600 dark:bg-surfacebg dark:text-slate-300' : 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400'}`}>{n.kind === 'headline' ? n.source : n.kind}</span>
-                                {(n.tags || []).map(t => <span key={t} className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-indigo-50 text-indigo-700 dark:bg-indigo-500/10 dark:text-indigo-300">{t}</span>)}
+                                <span className={`px-1.5 py-0.5 rounded text-[11px] font-bold ${n.kind === 'headline' ? 'bg-slate-100 text-slate-600 dark:bg-surfacebg dark:text-slate-300' : 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400'}`}>{n.kind === 'headline' ? n.source : n.kind}</span>
+                                {(n.tags || []).map(t => <span key={t} className="px-1.5 py-0.5 rounded text-[11px] font-semibold bg-indigo-50 text-indigo-700 dark:bg-indigo-500/10 dark:text-indigo-300">{t}</span>)}
                                 <span className="text-[11px] text-slate-500">{n.time ? `${new Date(n.time).toLocaleString('en-US', { timeZone: ZONE, hour: 'numeric', minute: '2-digit', month: 'short', day: 'numeric' })} ${TZ}` : ''}</span>
                             </div>
                             <a href={n.link} target="_blank" rel="noopener noreferrer" className="font-semibold text-sm text-slate-800 dark:text-slate-100 hover:text-emerald-600 dark:hover:text-emerald-400">{n.title}</a>
@@ -276,7 +278,7 @@ function NewsView({ desk, symbol, onGo }) {
     );
 }
 
-function EntryView({ desk, symbol, bars, watched, onToggleWatch, onGo }) {
+function EntryView({ desk, symbol, bars, watched, onToggleWatch, onGo, hideWatch = false }) {
     const e = desk.plans?.[symbol]?.entry;
     if (!e) return <Empty>{symbol} has no entry check in this desk (only the scanner's breakouts are carried through).</Empty>;
     const t = e.trigger;
@@ -287,10 +289,10 @@ function EntryView({ desk, symbol, bars, watched, onToggleWatch, onGo }) {
                     <h2 className="font-bold text-slate-800 dark:text-white">Entry Timer · {symbol}<ToolTag tool="entry.py check" /></h2>
                     <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Opening-range breakout, long only. Entries allowed {e.no_entries_before}–{e.no_entries_after} {TZ}.</p>
                 </div>
-                <button onClick={() => onToggleWatch(symbol)}
+                {!hideWatch && <button onClick={() => onToggleWatch(symbol)}
                     className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold border ${watched ? 'bg-emerald-600 border-emerald-600 text-white' : 'border-slate-200 dark:border-borderdark text-slate-600 dark:text-slate-300'}`}>
                     {watched ? <Eye size={15} /> : <EyeOff size={15} />} {watched ? 'Watching' : 'Watch & alert me'}
-                </button>
+                </button>}
             </div>
             <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-2">
                 <Stat label="Status" value={e.status} tone={STATUS_TONE[e.status]} />
@@ -428,13 +430,13 @@ function RiskView({ risk, engine, onGo }) {
     );
 }
 
-function OrderView({ symbol, plan, sizing, risk, orders, onPlace, onClose }) {
+function OrderView({ symbol, plan, sizing, risk, orders, onPlace, onClose, showTicket = true, showBook = true }) {
     const [confirm, setConfirm] = useState('');
     const ready = risk?.verdict === 'PASS' && sizing?.qty > 0;
     const ok = ready && confirm.trim().toLowerCase() === 'yes';
     return (
         <div className="space-y-4">
-            <Card>
+            {showTicket && <Card>
                 <h2 className="font-bold text-slate-800 dark:text-white mb-1">Order Desk · paper account<ToolTag tool="trader-broker" /></h2>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
                     Paper only. Like the skill, this never sends anything to a broker; the order is recorded in this browser and filled at the plan's entry.
@@ -455,8 +457,8 @@ function OrderView({ symbol, plan, sizing, risk, orders, onPlace, onClose }) {
                         </div>
                     </>
                 ) : <Empty>Only an order the Risk Manager passed can go here.</Empty>}
-            </Card>
-            <Card>
+            </Card>}
+            {showBook && <Card>
                 <h3 className="font-bold text-slate-800 dark:text-white mb-2">Paper orders</h3>
                 {orders.length === 0 ? <Empty>No paper orders yet.</Empty> : (
                     <div className="overflow-x-auto">
@@ -480,7 +482,7 @@ function OrderView({ symbol, plan, sizing, risk, orders, onPlace, onClose }) {
                         </table>
                     </div>
                 )}
-            </Card>
+            </Card>}
         </div>
     );
 }
@@ -608,14 +610,8 @@ function CongressView({ desk }) {
 
 // ── page ─────────────────────────────────────────────────────────────────────
 
-export default function DayTrader() {
-    const [theme, setTheme] = useState(savedTheme);
-    const dark = theme === 'dark';
+export default function DayTrader({ market = 'IN', onSource }) {
     const liveBase = useLiveApiBase();
-    // India by default: the desk's own choice, else the screener's market, else India
-    const [market, setMarket] = useState(() => {
-        try { return (localStorage.getItem(MARKET_KEY) || localStorage.getItem('screenerMarket')) === 'US' ? 'US' : 'IN'; } catch { return 'IN'; }
-    });
     setMarketDisplay(market);
     const sess = SESSIONS[market];
     const mq = market === 'IN' ? '&market=IN' : '';
@@ -623,7 +619,7 @@ export default function DayTrader() {
     const [source, setSource] = useState(null);
     const [error, setError] = useState(null);
     const [loading, setLoading] = useState(true);
-    const [tab, setTab] = useState('scanner');
+    const [tab, setTab] = useState('desk');           // desk | news | orders | analyst | congress
     const [symbol, setSymbol] = useState(null);
     const [bars, setBars] = useState({});
     const [rules, setRules] = useState({ stop: 'or-mid', target: '2R' });
@@ -645,6 +641,7 @@ export default function DayTrader() {
                 market === 'IN' ? 'daytrader-IN.json' : 'daytrader.json');
             setDesk(body);
             setSource(src);
+            onSource?.(src);
             setError(null);
         } catch (e) {
             setError(e.message);
@@ -659,14 +656,6 @@ export default function DayTrader() {
         return () => clearInterval(id);
     }, [load, liveBase]);
 
-    const switchMarket = (m) => {
-        if (m === market) return;
-        try { localStorage.setItem(MARKET_KEY, m); } catch { /* storage unavailable */ }
-        setDesk(null); setSymbol(null); setBars({}); setReplan(null); setSized(null); setError(null);
-        setSettings(loadSettings(m, m === 'IN' ? INDIA_DEFAULTS : null));
-        setMarket(m);
-        if (m === 'IN' && ['analyst', 'congress'].includes(tab)) setTab('scanner');
-    };
 
     useEffect(() => { try { localStorage.setItem(settingsKey(market), JSON.stringify(settings)); } catch { /* ignore */ } }, [settings]);
     useEffect(() => saveOrders(orders), [orders]);
@@ -735,7 +724,9 @@ export default function DayTrader() {
         return out;
     }, [bars, desk]);
 
-    const todayEntries = orders.filter(o => sameDay(o.placedAt));
+    // Paper orders stay with their market ($ and ₹ books don't mix); older orders were US
+    const marketOrders = orders.filter(o => (o.market || 'US') === market);
+    const todayEntries = marketOrders.filter(o => sameDay(o.placedAt));
 
     // Budget + risk: the skill's size.py and check.py via the live API, else the browser ports
     useEffect(() => {
@@ -795,7 +786,7 @@ export default function DayTrader() {
         }
         prevStatus.current = Object.fromEntries(Object.entries(desk.plans || {}).map(([s, p]) => [s, p.entry?.status]));
         const now = nyClock(desk.as_of);
-        if (desk.clock?.open && orders.some(o => o.status === 'open' && now >= (o.flat_by || '15:55'))) {
+        if (desk.clock?.open && marketOrders.some(o => o.status === 'open' && now >= (o.flat_by || '15:55'))) {
             addAlert(`flat-${desk.as_of.slice(0, 10)}`, 'Flat-by time: close your open paper positions before the bell.');
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -804,7 +795,7 @@ export default function DayTrader() {
     const placeOrder = () => {
         const s = sized.sizing;
         setOrders(o => markToMarket([...o, { id: `${Date.now()}`, symbol, qty: s.qty, entry: s.entry, stop: s.stop, target: s.target,
-            max_loss: s.max_loss, flat_by: plan.flat_by, status: 'open', placedAt: new Date().toISOString() }], prices));
+            max_loss: s.max_loss, flat_by: plan.flat_by, market, status: 'open', placedAt: new Date().toISOString() }], prices));
         setTab('alerts');
     };
     const closeOrder = (id) => setOrders(os => os.map(o => {
@@ -818,116 +809,218 @@ export default function DayTrader() {
     const toggleWatch = (sym) => setWatches(w => (w.includes(sym) ? w.filter(s => s !== sym) : [...w, sym]));
 
     const stale = source === 'snapshot' && desk?.clock?.open && desk?.generated_at && Date.now() - new Date(desk.generated_at).getTime() > 40 * 60000;
-    const needsSymbol = !['scanner', 'congress', 'alerts', 'broker'].includes(tab);
-    const usOnly = market === 'IN' && ['analyst', 'congress'].includes(tab);
-    const symbolChoices = [...new Set([...(desk?.scan?.hits || []).map(h => h.symbol), ...Object.keys(desk?.plans || {})])];
+    const hits = desk?.scan?.hits || [];
+    const daily = desk?.daily?.hits || [];
+    const openOrders = marketOrders.filter(o => o.status === 'open');
+    const symbolChoices = [...new Set([...hits.map(h => h.symbol), ...Object.keys(desk?.plans || {})])];
+    const entry = base?.entry;
+    const lastPrice = prices[symbol];
+    const tvSymbol = market === 'IN' ? `NSE:${String(symbol || '').replace(/&/g, '_').replace(/-/g, '_')}` : String(symbol || '').replace(/-/g, '.');
 
-    const view = () => {
-        if (!desk) return null;
-        if (usOnly) return <Empty>{tab === 'analyst' ? 'The Earnings Analyst reads SEC filings, so it covers US companies only.' : 'The Congress tracker reads US House disclosures, so it covers US stocks only.'} Switch to 🇺🇸 US above.</Empty>;
-        if (needsSymbol && !symbol) return <Empty>Pick a stock in the Scanner first.</Empty>;
-        switch (tab) {
-            case 'scanner': return <ScannerView desk={desk} symbol={symbol} onPick={pick} onGo={setTab} />;
-            case 'news': return <NewsView desk={desk} symbol={symbol} onGo={setTab} />;
-            case 'entry': return <EntryView desk={desk} symbol={symbol} bars={symBars} watched={watches.includes(symbol)} onToggleWatch={toggleWatch} onGo={setTab} />;
-            case 'exit': return replan?.error ? <Empty>{replan.error}</Empty> : <ExitView symbol={symbol} plan={plan} rules={rules} setRules={setRules} replanning={replanning} engine={planEngine} onGo={setTab} />;
-            case 'timemachine': return <TimeMachineView symbol={symbol} tm={tm} replanning={replanning} onGo={setTab} />;
-            case 'budget': return plan ? <BudgetView sizing={sized?.sizing} settings={settings} setSettings={setSettings} engine={sized?.engine} error={sized?.error} onGo={setTab} /> : <Empty>Plan a trade first.</Empty>;
-            case 'risk': return <RiskView risk={sized?.risk} engine={sized?.engine} onGo={setTab} />;
-            case 'broker': return <OrderView symbol={symbol} plan={plan} sizing={sized?.sizing} risk={sized?.risk} orders={orders} onPlace={placeOrder} onClose={closeOrder} />;
-            case 'alerts': return <AlertsView clock={desk.clock} permission={permission} onEnable={enableNotifications} log={alertLog} orders={orders} watches={watches} />;
-            case 'analyst': return <AnalystView desk={desk} symbol={symbol} />;
-            case 'congress': return <CongressView desk={desk} />;
-            default: return null;
-        }
+    // Where this trade stands, step by step (each step jumps to its section)
+    const orderedToday = marketOrders.some(o => o.symbol === symbol && sameDay(o.placedAt));
+    const steps = [
+        ['setup', 'Setup', entry?.status === 'triggered' ? 'ok' : entry ? 'wait' : 'none', entry?.status || '—'],
+        ['plan', 'Plan', plan?.stop ? 'ok' : 'none', plan?.stop ? `${plan.target_r ?? ''}R · stop ${money(plan.stop, plan.stop >= 1000 ? 0 : 2)}` : '—'],
+        ['odds', 'Odds', tm ? (/toward the target/.test(tm.verdict) ? 'ok' : /toward the stop/.test(tm.verdict) ? 'bad' : 'wait') : 'none', tm ? shortVerdict(tm.verdict) : '—'],
+        ['size', 'Size', sized?.sizing ? (sized.sizing.refusal ? 'bad' : 'ok') : sized?.error ? 'bad' : 'none', sized?.sizing ? (sized.sizing.refusal ? 'no order' : `${sized.sizing.qty} sh`) : '—'],
+        ['risk', 'Risk', sized?.risk ? (sized.risk.verdict === 'PASS' ? 'ok' : 'bad') : 'none', sized?.risk?.verdict || '—'],
+        ['order', 'Order', orderedToday ? 'ok' : 'none', orderedToday ? 'paper order placed' : 'paper only'],
+    ];
+    const STEP_TONE = {
+        ok: 'border-green-500/60 bg-green-50 dark:bg-green-500/10 text-green-800 dark:text-green-300',
+        wait: 'border-amber-500/60 bg-amber-50 dark:bg-amber-500/10 text-amber-800 dark:text-amber-300',
+        bad: 'border-red-500/60 bg-red-50 dark:bg-red-500/10 text-red-800 dark:text-red-300',
+        none: 'border-slate-200 dark:border-borderdark text-slate-500 dark:text-slate-400',
     };
+    const jump = (id) => document.getElementById(`dt-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+    const TABS = [
+        ['desk', 'Trade desk'],
+        ['news', 'News'],
+        ['orders', `Orders & alerts${openOrders.length ? ` · ${openOrders.length}` : ''}`],
+        ...(market === 'US' ? [['analyst', 'Earnings'], ['congress', 'Congress']] : []),
+    ];
+    const exchange = market === 'IN' ? 'NSE' : 'NYSE';
+
+    const symbolRow = symbolChoices.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+            <span className="text-slate-500 dark:text-slate-400">Stock:</span>
+            {symbolChoices.map(sy => (
+                <button key={sy} onClick={() => pick(sy)}
+                    className={`px-2 py-0.5 rounded-md font-semibold ${symbol === sy ? 'bg-slate-800 text-white dark:bg-white dark:text-slate-900' : 'bg-slate-100 dark:bg-surfacebg text-slate-600 dark:text-slate-300'}`}>{sy}</button>
+            ))}
+        </div>
+    );
 
     return (
-        <div className={dark ? 'dark' : ''}>
-            <div className="min-h-[100dvh] bg-slate-50 dark:bg-darkbg text-slate-800 dark:text-slate-200 font-sans antialiased">
-                <header className="sticky top-0 z-10 border-b border-slate-200 dark:border-borderdark bg-white dark:bg-cardbg">
-                    <div className="max-w-7xl mx-auto px-3 md:px-6 h-12 flex items-center justify-between gap-3">
-                        <a href="./#daytrader" className="flex items-center gap-2 font-brand text-lg font-semibold tracking-[-0.02em] text-slate-900 dark:text-white">
-                            <img src="./logo-light.svg" alt="" width="24" height="24" className="dark:hidden" /><img src="./logo.svg" alt="" width="24" height="24" className="hidden dark:block" />
-                            <span>Fin<span className="text-emerald-600 dark:text-emerald-400">Engine</span></span> <span className="hidden sm:inline text-sm font-normal text-slate-500 dark:text-slate-400">Day Trader</span>
-                        </a>
-                        <div className="flex items-center gap-2">
-                            {desk?.as_of && (
-                                <span className="hidden md:inline text-[11px] text-slate-500 dark:text-slate-400" title={desk.generated_at && new Date(desk.generated_at).toLocaleString()}>
-                                    As of {desk.as_of} {TZ}{desk.generated_at && ` · built ${ageText(desk.generated_at)}`}
-                                </span>
-                            )}
-                            <div role="radiogroup" aria-label="Market" className="inline-flex p-0.5 rounded-lg bg-slate-100 dark:bg-surfacebg border border-slate-200 dark:border-borderdark">
-                                {[['US', '🇺🇸 US'], ['IN', '🇮🇳 India']].map(([m, label]) => (
-                                    <button key={m} role="radio" aria-checked={market === m} onClick={() => switchMarket(m)}
-                                        className={`px-2.5 py-1 rounded-md text-xs font-semibold ${market === m ? 'bg-white dark:bg-cardbg text-emerald-700 dark:text-emerald-400 shadow-sm' : 'text-slate-500 dark:text-slate-400'}`}>{label}</button>
-                                ))}
-                            </div>
-                            <LiveDataButton source={source} />
-                            <button onClick={load} aria-label="Reload data" className="w-8 h-8 flex items-center justify-center rounded-lg border border-slate-200 dark:border-borderdark text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-surfacebg">
-                                <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
-                            </button>
-                            <button onClick={() => setTheme(dark ? 'light' : 'dark')} aria-label={dark ? 'Switch to light theme' : 'Switch to dark theme'}
-                                className="w-8 h-8 flex items-center justify-center rounded-lg border border-slate-200 dark:border-borderdark text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-surfacebg">
-                                {dark ? <Sun size={15} /> : <Moon size={15} />}
-                            </button>
-                            <a href="./#" className="flex items-center gap-1.5 h-8 px-3 rounded-lg border border-slate-200 dark:border-borderdark text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-surfacebg">
-                                <LineChart size={14} /> Screener
-                            </a>
-                        </div>
-                    </div>
-                </header>
-
-                <main className="max-w-7xl mx-auto px-3 md:px-6 py-4 md:py-6 space-y-4">
-                    <nav className="flex gap-1.5 overflow-x-auto pb-1" aria-label="Desk skills">
-                        {SKILLS.map((s, i) => {
-                            const Icon = s.icon;
-                            return (
-                                <button key={s.key} onClick={() => setTab(s.key)} title={`${s.tool}: ${s.desc}`} aria-current={tab === s.key ? 'page' : undefined}
-                                    className={`shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${tab === s.key ? 'bg-emerald-600 border-emerald-600 text-white' : 'border-slate-200 dark:border-borderdark text-slate-600 dark:text-slate-300 hover:border-emerald-500'}`}>
-                                    <span className="opacity-60">{i + 1}</span><Icon size={14} />{s.title}
-                                </button>
-                            );
-                        })}
-                    </nav>
-
-                    {desk && symbol && needsSymbol && symbolChoices.length > 0 && (
-                        <div className="flex flex-wrap items-center gap-2 text-xs">
-                            <span className="text-slate-500 dark:text-slate-400">Stock:</span>
-                            {symbolChoices.map(s => (
-                                <button key={s} onClick={() => pick(s)}
-                                    className={`px-2 py-0.5 rounded-md font-semibold ${symbol === s ? 'bg-slate-800 text-white dark:bg-white dark:text-slate-900' : 'bg-slate-100 dark:bg-surfacebg text-slate-600 dark:text-slate-300'}`}>{s}</button>
-                            ))}
-                        </div>
-                    )}
-
-                    {error && (
-                        <div className="p-4 rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 text-sm text-red-700 dark:text-red-400 flex gap-2">
-                            <AlertTriangle size={18} className="shrink-0" /> <span>Couldn't load the desk. {error}</span>
-                        </div>
-                    )}
-                    {stale && (
-                        <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-500/10 text-sm text-amber-800 dark:text-amber-300 flex gap-2">
-                            <AlertTriangle size={17} className="shrink-0" /> The market is open but this snapshot was built {ageText(desk.generated_at)}. Connect live data (top right) for fresh bars.
-                        </div>
-                    )}
-                    {desk?.errors?.length > 0 && (
-                        <details className="text-xs text-slate-500 dark:text-slate-400">
-                            <summary className="cursor-pointer">{desk.errors.length} part{desk.errors.length > 1 ? 's' : ''} of the last update failed</summary>
-                            <ul className="mt-1 list-disc list-inside">{desk.errors.map((e, i) => <li key={i}>{e}</li>)}</ul>
-                        </details>
-                    )}
-                    {loading && !desk && !error && <div className="p-6 text-center text-slate-500">Loading the desk…</div>}
-
-                    {view()}
-
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400 pt-2">
-                        Results from the open-source <a className="underline" href="https://github.com/Jakeschincariol/day-trader-skill" target="_blank" rel="noopener noreferrer">day-trader-skill</a> (Jake Schincariol, MIT).
-                        Data: Yahoo Finance (unofficial, can lag), Nasdaq Trader, SEC EDGAR and the House Clerk. {source === 'live' ? 'Live: rebuilt every minute.' : 'Snapshot: rebuilt about every 15 minutes in market hours.'}
-                        {' '}Educational only, not financial advice. Most day traders lose money; paper trade first.
-                    </p>
-                </main>
+        <div className="max-w-[1600px] mx-auto p-3 md:p-5 space-y-3">
+            {/* Market status */}
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
+                <span className="inline-flex items-center gap-1.5 font-semibold text-slate-700 dark:text-slate-200">
+                    <span className={`w-2 h-2 rounded-full ${desk?.clock?.open ? 'bg-green-500 animate-pulse' : 'bg-slate-400'}`} />
+                    {exchange} {desk?.clock ? (desk.clock.open ? 'open' : 'closed') : ''}
+                </span>
+                {desk?.as_of && <span>Desk as of {desk.as_of} {TZ}</span>}
+                {desk?.generated_at && <span>{source === 'live' ? 'live' : 'snapshot'} · built {ageText(desk.generated_at)}</span>}
+                <button onClick={load} className="inline-flex items-center gap-1 min-h-[44px] sm:min-h-0 px-1 hover:text-slate-800 dark:hover:text-slate-200"><RefreshCw size={12} className={loading ? 'animate-spin' : ''} /> Refresh</button>
+                {market === 'IN' && <span title="The skill runs on NYSE hours; India uses FinEngine's port of its rules, checked against the skill">India: the skill's rules on NSE hours</span>}
             </div>
+            {desk?.replay_note && <div className="text-xs font-semibold text-amber-700 dark:text-amber-400">{desk.replay_note}</div>}
+
+            {error && (
+                <div className="p-3 rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 text-sm text-red-700 dark:text-red-400 flex gap-2">
+                    <AlertTriangle size={17} className="shrink-0" /> <span>Couldn't load the desk. {error}</span>
+                </div>
+            )}
+            {stale && (
+                <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-500/10 text-sm text-amber-800 dark:text-amber-300 flex gap-2">
+                    <AlertTriangle size={17} className="shrink-0" /> The market is open but this snapshot was built {ageText(desk.generated_at)}. Connect live data (top right) for fresh bars.
+                </div>
+            )}
+
+            {/* Sections */}
+            <div role="tablist" className="flex gap-1 overflow-x-auto border-b border-slate-200 dark:border-borderdark">
+                {TABS.map(([key, label]) => (
+                    <button key={key} role="tab" aria-selected={tab === key} onClick={() => setTab(key)}
+                        className={`shrink-0 px-3 min-h-[44px] sm:min-h-0 py-2 text-sm font-semibold border-b-2 -mb-px ${tab === key ? 'border-emerald-500 text-slate-900 dark:text-white' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'}`}>
+                        {label}
+                    </button>
+                ))}
+            </div>
+
+            {loading && !desk && !error && <div className="p-6 text-center text-slate-500">Loading the desk…</div>}
+
+            {desk && tab === 'desk' && (
+                <div className="grid lg:grid-cols-[300px_minmax(0,1fr)] gap-4 items-start">
+                    {/* Left: what the scanner found */}
+                    <aside className="space-y-3 lg:sticky lg:top-16">
+                        <Card className="!p-3">
+                            <div className="flex items-baseline justify-between mb-2">
+                                <h2 className="font-bold text-slate-800 dark:text-white">Breakouts</h2>
+                                <span className="text-[11px] text-slate-500">{hits.length} of {desk.scan?.scanned ?? 0} scanned</span>
+                            </div>
+                            {hits.length === 0 ? (
+                                <p className="text-sm text-slate-500 dark:text-slate-400">No opening-range breakouts {desk.clock?.open ? 'yet today' : 'in this session'}. {desk.scan?.note && <span className="block mt-1 text-xs">{desk.scan.note}</span>}</p>
+                            ) : (
+                                <ul className="space-y-1.5">
+                                    {hits.map(h => {
+                                        const p = desk.plans?.[h.symbol];
+                                        const v = p?.timemachine?.verdict?.split(':')[0];
+                                        const tone = !v ? 'text-slate-400' : /target/.test(v) ? 'text-green-600 dark:text-green-400' : /stop/.test(v) ? 'text-red-600 dark:text-red-400' : 'text-amber-600 dark:text-amber-400';
+                                        return (
+                                            <li key={h.symbol}>
+                                                <button onClick={() => { pick(h.symbol); if (window.innerWidth < 1024) setTimeout(() => jump('top'), 50); }}
+                                                    className={`w-full text-left rounded-lg border px-3 py-2 ${symbol === h.symbol ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-500/10' : 'border-slate-200 dark:border-borderdark hover:border-slate-300 dark:hover:border-slate-600'}`}>
+                                                    <div className="flex items-baseline justify-between gap-2">
+                                                        <span className="font-bold text-slate-900 dark:text-white">{h.symbol}</span>
+                                                        <span className="font-mono text-sm">{money(h.price)}</span>
+                                                    </div>
+                                                    <div className="flex items-baseline justify-between gap-2 text-[11px]">
+                                                        <span className="text-slate-500">{h.at} · <span className="text-green-600 dark:text-green-400">{pct(h.pct_over, 2)}</span> over range</span>
+                                                        <span className={`font-semibold ${tone}`}>{v ? shortVerdict(v) : p?.entry?.status}</span>
+                                                    </div>
+                                                </button>
+                                            </li>
+                                        );
+                                    })}
+                                </ul>
+                            )}
+                        </Card>
+                        <Card className="!p-3">
+                            <h2 className="font-bold text-slate-800 dark:text-white mb-1">Daily setups</h2>
+                            <p className="text-[11px] text-slate-500 dark:text-slate-400 mb-2">From daily closes: 20-day breakout, bull flag, reclaimed 20-day average, oversold, oversold bounce.</p>
+                            {daily.length === 0 ? <p className="text-sm text-slate-500">None in the watchlist.</p> : (
+                                <div className="flex flex-wrap gap-1.5">
+                                    {daily.map(h => (
+                                        <a key={h.symbol} href={market === 'IN' ? `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(`NSE:${h.symbol.replace(/&/g, '_').replace(/-/g, '_')}`)}` : `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(h.symbol.replace(/-/g, '.'))}`}
+                                            target="_blank" rel="noopener noreferrer" title="Open on TradingView"
+                                            className="px-2 py-1 rounded-lg bg-slate-50 dark:bg-surfacebg text-[11px] hover:ring-1 hover:ring-emerald-500">
+                                            <b className="text-slate-800 dark:text-white">{h.symbol}</b> <span className="text-emerald-700 dark:text-emerald-400">{(h.setups || []).join(', ').replace(/_/g, ' ')}</span>
+                                        </a>
+                                    ))}
+                                </div>
+                            )}
+                        </Card>
+                    </aside>
+
+                    {/* Right: the trade, top to bottom */}
+                    <section id="dt-top" className="min-w-0 space-y-3 scroll-mt-16">
+                        {!symbol || !base ? (
+                            <Card>
+                                <h2 className="font-bold text-slate-800 dark:text-white mb-1">Pick a breakout</h2>
+                                <p className="text-sm text-slate-600 dark:text-slate-300">
+                                    The scanner lists stocks whose first 5-minute close after the opening range broke above it. Pick one to see its plan,
+                                    the odds from 10,000 replays, your position size, the risk check and a paper order, all on this page.
+                                </p>
+                            </Card>
+                        ) : (
+                            <>
+                                <Card className="!p-3">
+                                    <div className="flex flex-wrap items-center justify-between gap-3">
+                                        <div className="flex items-baseline gap-3">
+                                            <h2 className="text-xl font-bold text-slate-900 dark:text-white">{symbol}</h2>
+                                            {lastPrice != null && <span className="font-mono text-lg">{money(lastPrice)}</span>}
+                                            <span className={`text-xs font-semibold ${STATUS_TONE[entry?.status] || ''}`}>{entry?.status}</span>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <button onClick={() => toggleWatch(symbol)}
+                                                className={`inline-flex items-center gap-1.5 h-11 sm:h-8 px-2.5 rounded-lg text-xs font-semibold border ${watches.includes(symbol) ? 'bg-emerald-600 border-emerald-600 text-white' : 'border-slate-200 dark:border-borderdark text-slate-600 dark:text-slate-300'}`}>
+                                                {watches.includes(symbol) ? <Eye size={14} /> : <EyeOff size={14} />} {watches.includes(symbol) ? 'Watching' : 'Watch'}
+                                            </button>
+                                            <a href={`https://www.tradingview.com/chart/?symbol=${encodeURIComponent(tvSymbol)}`} target="_blank" rel="noopener noreferrer"
+                                                className="inline-flex items-center gap-1 h-11 sm:h-8 px-2.5 rounded-lg text-xs font-semibold border border-slate-200 dark:border-borderdark text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-surfacebg">
+                                                TradingView <ExternalLink size={12} />
+                                            </a>
+                                        </div>
+                                    </div>
+                                    <ol className="mt-3 grid grid-cols-3 sm:grid-cols-6 gap-1.5">
+                                        {steps.map(([id, label, state, note], i) => (
+                                            <li key={id}>
+                                                <button onClick={() => jump(id)} className={`w-full text-left rounded-lg border px-2 py-1.5 ${STEP_TONE[state]}`}>
+                                                    <div className="text-[11px] font-semibold uppercase tracking-wide opacity-80">{i + 1}. {label}</div>
+                                                    <div className="text-[11px] font-semibold truncate">{note}</div>
+                                                </button>
+                                            </li>
+                                        ))}
+                                    </ol>
+                                </Card>
+                                <div id="dt-setup" className="scroll-mt-16"><EntryView desk={desk} symbol={symbol} bars={symBars} watched={watches.includes(symbol)} onToggleWatch={toggleWatch} hideWatch /></div>
+                                <div id="dt-plan" className="scroll-mt-16">{replan?.error ? <Empty>{replan.error}</Empty> : <ExitView symbol={symbol} plan={plan} rules={rules} setRules={setRules} replanning={replanning} engine={planEngine} />}</div>
+                                <div id="dt-odds" className="scroll-mt-16"><TimeMachineView symbol={symbol} tm={tm} replanning={replanning} /></div>
+                                {plan?.stop ? (
+                                    <>
+                                        <div id="dt-size" className="scroll-mt-16"><BudgetView sizing={sized?.sizing} settings={settings} setSettings={setSettings} engine={sized?.engine} error={sized?.error} /></div>
+                                        <div id="dt-risk" className="scroll-mt-16"><RiskView risk={sized?.risk} engine={sized?.engine} /></div>
+                                        <div id="dt-order" className="scroll-mt-16"><OrderView symbol={symbol} plan={plan} sizing={sized?.sizing} risk={sized?.risk} orders={marketOrders} onPlace={placeOrder} onClose={closeOrder} showBook={false} /></div>
+                                    </>
+                                ) : <span id="dt-size" />}
+                            </>
+                        )}
+                    </section>
+                </div>
+            )}
+
+            {desk && tab === 'news' && <div className="space-y-3">{symbolRow}{symbol ? <NewsView desk={desk} symbol={symbol} /> : <Empty>Pick a stock.</Empty>}</div>}
+            {desk && tab === 'orders' && (
+                <div className="grid lg:grid-cols-2 gap-4 items-start">
+                    <OrderView symbol={symbol} plan={plan} sizing={sized?.sizing} risk={sized?.risk} orders={marketOrders} onPlace={placeOrder} onClose={closeOrder} showTicket={false} />
+                    <AlertsView clock={desk.clock} permission={permission} onEnable={enableNotifications} log={alertLog} orders={marketOrders} watches={watches} />
+                </div>
+            )}
+            {desk && tab === 'analyst' && <div className="space-y-3">{symbolRow}{symbol ? <AnalystView desk={desk} symbol={symbol} /> : <Empty>Pick a stock.</Empty>}</div>}
+            {desk && tab === 'congress' && <CongressView desk={desk} />}
+
+            {desk?.errors?.length > 0 && (
+                <details className="text-xs text-slate-500 dark:text-slate-400">
+                    <summary className="cursor-pointer">{desk.errors.length} part{desk.errors.length > 1 ? 's' : ''} of the last update failed</summary>
+                    <ul className="mt-1 list-disc list-inside">{desk.errors.map((e, i) => <li key={i}>{e}</li>)}</ul>
+                </details>
+            )}
+            <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                Results from the open-source <a className="underline" href="https://github.com/Jakeschincariol/day-trader-skill" target="_blank" rel="noopener noreferrer">day-trader-skill</a> (Jake Schincariol, MIT).
+                Paper trading only: nothing is sent to a broker. Most day traders lose money.
+            </p>
         </div>
     );
 }

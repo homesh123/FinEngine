@@ -1,14 +1,19 @@
-import React, { useState, useEffect } from 'react';
-import ChartLinkButton from './ChartLinkButton';
+import React, { useEffect, useState } from 'react';
+import { AlertCircle, ArrowDown, ArrowUp, ArrowUpDown, ExternalLink, RefreshCw, Search, Settings2, Trophy, X } from 'lucide-react';
 import MiniStockChart from './MiniStockChart';
-import { Settings2, RefreshCw, AlertCircle, Trophy, Zap, ArrowRight } from 'lucide-react';
 import CriteriaConfigModal from './CriteriaConfigModal';
 import InfoTip from './InfoTip';
 import TopPicksPage from './TopPicksPage';
 import { formatMoney } from '../utils/money';
+import { tradingViewUrl } from '../utils/openChart';
 import { ageText, getData, hasLiveApi, liveJson } from '../utils/dataSource';
 import { useLiveApiBase } from './LiveDataButton';
 import { applyCriteria, DEFAULT_CRITERIA, savedCriteria } from '../utils/screenerRules';
+
+// Long-term screener: a sortable table of the market's stocks with the
+// criteria's verdict; click one for its chart and the reasoning.
+
+const LIVE_REFRESH_MS = 60000;
 
 // Plain-language explanations shown behind the (i) icons. They describe exactly
 // how each number is calculated in this screener.
@@ -67,13 +72,13 @@ function HoldingPeriod({ stock, compact = false }) {
     if (!stock.horizon_period) {
         // Results saved before this change: show the old label
         return stock.holding_horizon ? (
-            <span className="text-[10px] text-slate-500 dark:text-slate-400">Horizon: {stock.holding_horizon}</span>
+            <span className="text-[11px] text-slate-500 dark:text-slate-400">Horizon: {stock.holding_horizon}</span>
         ) : null;
     }
     return (
         <span className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 font-medium
                           bg-slate-50 border-slate-200 text-slate-700
-                          dark:bg-slate-800 dark:border-slate-700 dark:text-slate-200 ${compact ? 'text-[10px]' : 'text-[11px]'}`}>
+                          dark:bg-slate-800 dark:border-slate-700 dark:text-slate-200 ${compact ? 'text-[11px]' : 'text-[11px]'}`}>
             <span className="text-slate-500 dark:text-slate-400">Hold for</span>
             <b>{stock.horizon_period}</b>
             <span className="text-slate-500 dark:text-slate-400">· {stock.horizon_category?.replace(/^.*?:\s*/, '')}</span>
@@ -117,26 +122,6 @@ function AnalystTarget({ stock }) {
     );
 }
 
-// The stock passes the required criteria (ROE, F-Score, margin of safety); timing only decides BUY vs BUY ON DIP
-const passesCriteria = (stock) => stock.investment_status?.startsWith('BUY');
-const LIVE_REFRESH_MS = 60000;
-
-// Entry to the Day Trader desk from the main screen
-function DayTraderBanner() {
-    return (
-        <a href="./#daytrader"
-           className="mb-4 md:mb-6 flex items-center justify-between gap-3 rounded-xl border border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/10 px-4 py-3 hover:border-emerald-400 transition-colors">
-            <span className="flex items-center gap-3 min-w-0">
-                <span className="w-9 h-9 shrink-0 rounded-lg bg-emerald-600 text-white flex items-center justify-center"><Zap size={18} /></span>
-                <span className="min-w-0">
-                    <span className="block font-bold text-slate-800 dark:text-white">Day Trader desk</span>
-                    <span className="block text-xs text-slate-600 dark:text-slate-300 truncate">Scanner, news, entry timer, exit plan, 10,000-replay Time Machine, sizing, risk checks and paper orders</span>
-                </span>
-            </span>
-            <span className="shrink-0 inline-flex items-center gap-1 text-sm font-semibold text-emerald-700 dark:text-emerald-400">Open <ArrowRight size={15} /></span>
-        </a>
-    );
-}
 
 const hasMos = (stock) => typeof stock.margin_of_safety === 'number';
 const mosText = (stock) =>
@@ -152,78 +137,163 @@ function AgentTag({ stock, compact }) {
     if (!a || !a.suggested) return null;
     return (
         <span title={`Agent: BUY, ${Math.round((a.confidence || 0) * 100)}% confident (${a.date}). ${a.reason || ''}`}
-            className={`inline-flex items-center gap-1 rounded-full bg-violet-100 text-violet-700 dark:bg-violet-500/20 dark:text-violet-300 font-semibold ${compact ? 'px-1.5 py-0.5 text-[9px]' : 'px-2 py-0.5 text-[10px]'}`}>
+            className={`inline-flex items-center gap-1 rounded-full bg-violet-100 text-violet-700 dark:bg-violet-500/20 dark:text-violet-300 font-semibold ${compact ? 'px-1.5 py-0.5 text-[11px]' : 'px-2 py-0.5 text-[11px]'}`}>
             🤖 Agent suggested{!compact && <span className="opacity-70">{Math.round((a.confidence || 0) * 100)}%</span>}
         </span>
     );
 }
 
-export default function InvestmentScreener({ onSource }) {
+
+const STATUS_STYLE = {
+    'BUY': 'bg-green-600 text-white',
+    'BUY ON DIP': 'bg-emerald-100 text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-300',
+    'WATCH': 'bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300',
+    'AVOID': 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400',
+};
+const statusStyle = (st = '') => STATUS_STYLE[st] || (st.includes('BUY') ? STATUS_STYLE.BUY : st.includes('SELL') ? 'bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300' : STATUS_STYLE.WATCH);
+const StatusBadge = ({ status }) => <span className={`inline-block px-2 py-0.5 rounded-md text-[11px] font-bold whitespace-nowrap ${statusStyle(status)}`}>{status}</span>;
+
+// Quick filters: what an investor scans for first
+const FILTERS = [
+    ['passing', 'Pass my criteria', s => s.investment_status?.startsWith('BUY')],
+    ['buy', 'Buy now', s => s.investment_status === 'BUY'],
+    ['dip', 'Buy on dip', s => s.investment_status === 'BUY ON DIP'],
+    ['watch', 'Watch', s => s.investment_status === 'WATCH'],
+    ['all', 'All', () => true],
+];
+
+const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+const COLUMNS = [   // key, label, sort value, align, tip
+    ['symbol', 'Stock', s => s.symbol, 'left'],
+    ['price', 'Price', s => num(s.current_price), 'right'],
+    ['status', 'Signal', s => ['BUY', 'BUY ON DIP', 'WATCH', 'AVOID'].indexOf(s.investment_status), 'left'],
+    ['upside', 'Upside', s => num(s.upside_pct), 'right', 'To the analysts’ average 12-month target'],
+    ['mos', 'Margin of safety', s => num(s.margin_of_safety), 'right', MOS_TIP],
+    ['roe', 'ROE', s => num(s.roe), 'right', ROE_TIP],
+    ['fscore', 'F-Score', s => (s.f_score_tests ? s.f_score_points / s.f_score_tests : null), 'right', FSCORE_TIP],
+    ['trend', 'Trend', s => trendScore(s), 'left', 'Price against its 50- and 200-day averages, and the daily RSI'],
+];
+
+function trendScore(s) {
+    const t = s.trend || {}, p = s.current_price;
+    if (!t.sma50) return null;
+    return (p > t.sma50 ? 1 : 0) + (t.sma200 && p > t.sma200 ? 1 : 0) + (t.sma50 && t.sma200 && t.sma50 > t.sma200 ? 1 : 0);
+}
+
+function Trend({ stock }) {
+    const t = stock.trend || {}, p = stock.current_price;
+    if (!t.sma50) return <span className="text-slate-400">—</span>;
+    const dot = (ok, label) => (
+        <span title={`${label}: price ${ok ? 'above' : 'below'}`} className={`inline-flex items-center gap-0.5 ${ok ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+            {ok ? '▲' : '▼'}<span className="text-[11px] text-slate-500 dark:text-slate-400">{label}</span>
+        </span>
+    );
+    return (
+        <span className="inline-flex items-center gap-2 text-xs whitespace-nowrap">
+            {dot(p > t.sma50, '50d')}{t.sma200 ? dot(p > t.sma200, '200d') : null}
+            {t.rsi14 != null && <span title="Daily RSI 14" className={`text-[11px] ${t.rsi14 >= 70 ? 'text-amber-600 dark:text-amber-400 font-semibold' : t.rsi14 <= 30 ? 'text-sky-600 dark:text-sky-400 font-semibold' : 'text-slate-500 dark:text-slate-400'}`}>RSI {Math.round(t.rsi14)}</span>}
+        </span>
+    );
+}
+
+const pctText = (v, d = 1) => (v == null ? '—' : `${v > 0 ? '+' : ''}${v.toFixed(d)}%`);
+
+function Metric({ label, value, tone = '', tip }) {
+    return (
+        <div className="rounded-lg bg-slate-50 dark:bg-slate-800/50 px-3 py-2 min-w-0">
+            <div className="text-[11px] uppercase tracking-wide text-slate-500 dark:text-slate-400 flex items-center gap-1">{label}{tip && <InfoTip title={label}>{tip}</InfoTip>}</div>
+            <div className={`font-mono font-bold text-sm ${tone || 'text-slate-800 dark:text-slate-100'}`}>{value}</div>
+        </div>
+    );
+}
+
+/** Everything about one stock: chart, why, analysts, timing, fundamentals. */
+function StockDetail({ stock, market, onClose }) {
+    const cur = stock.currency || (market === 'IN' ? 'INR' : 'USD');
+    return (
+        <div className="flex flex-col gap-3">
+            <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                        <h2 className="text-lg font-bold text-slate-900 dark:text-white">{stock.symbol}</h2>
+                        <StatusBadge status={stock.investment_status} />
+                        <AgentTag stock={stock} compact />
+                    </div>
+                    <div className="text-xs text-slate-500 dark:text-slate-400 truncate">{stock.name}{stock.sector ? ` · ${stock.sector}` : ''}</div>
+                </div>
+                <div className="text-right shrink-0">
+                    <div className="font-mono text-lg font-bold text-slate-900 dark:text-white">{formatMoney(stock.current_price, cur, 2)}</div>
+                    <div className="flex items-center gap-1 justify-end mt-1">
+                        <a href={tradingViewUrl(stock.symbol, market)} target="_blank" rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 h-11 sm:h-auto px-2.5 sm:py-1 rounded-md text-[11px] font-semibold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700">
+                            TradingView <ExternalLink size={11} />
+                        </a>
+                        {onClose && <button onClick={onClose} aria-label="Close" className="w-11 h-11 sm:w-7 sm:h-7 flex items-center justify-center rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 dark:hover:text-slate-200"><X size={16} /></button>}
+                    </div>
+                </div>
+            </div>
+            <MiniStockChart symbol={stock.symbol} market={market} height={220} />
+            <div className="rounded-lg border border-slate-200 dark:border-slate-800 p-3 text-[13px] leading-relaxed text-slate-700 dark:text-slate-200">
+                <div className="font-semibold text-slate-900 dark:text-white mb-1">Why {stock.investment_status}</div>
+                {stock.action_reason}
+                <div className="mt-2 text-xs text-slate-500 dark:text-slate-400"><b>Timing:</b> {stock.execution_timing || 'N/A'}</div>
+            </div>
+            <AnalystTarget stock={stock} />
+            <HoldingPeriod stock={stock} />
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                <Metric label="ROE" value={stock.roe != null ? `${stock.roe.toFixed(1)}%` : '—'} tip={ROE_TIP} />
+                <Metric label="F-Score" value={fScoreText(stock)} tip={FSCORE_TIP} />
+                <Metric label="Margin of safety" value={mosText(stock)} tone={mosClass(stock)} tip={MOS_TIP} />
+                <Metric label="Revenue growth" value={pctText(stock.revenue_growth)} />
+                <Metric label="EPS growth" value={pctText(stock.eps_growth)} />
+                <Metric label="Gross margin" value={stock.gross_margin != null ? `${stock.gross_margin.toFixed(1)}%` : '—'} />
+                <Metric label="Debt / equity" value={stock.debt_to_equity != null ? stock.debt_to_equity.toFixed(2) : '—'} />
+                <Metric label="PEG" value={stock.peg != null ? stock.peg.toFixed(2) : '—'} />
+                <Metric label="RSI (daily)" value={stock.trend?.rsi14 != null ? Math.round(stock.trend.rsi14) : '—'} />
+            </div>
+            {stock.f_score_note && <p className="text-[11px] text-amber-700 dark:text-amber-400">{stock.f_score_note}</p>}
+        </div>
+    );
+}
+
+export default function InvestmentScreener({ market = 'IN', onSource }) {
     const [stocks, setStocks] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [showConfig, setShowConfig] = useState(false);
-    // India / US toggle (remembered per browser)
-    const [market, setMarket] = useState(() => {
-        try { return localStorage.getItem('screenerMarket') === 'IN' ? 'IN' : 'US'; } catch { return 'US'; }   // US by default
-    });
-    const [chartOf, setChartOf] = useState(null);       // stock whose chart shows beside the list
-    const toggleChart = (sym) => setChartOf(c => (c === sym ? null : sym));
-    const changeMarket = (m) => {
-        if (m === market) return;
-        try { localStorage.setItem('screenerMarket', m); } catch { /* storage unavailable */ }
-        setStocks([]);
-        setSearchQuery('');
-        setSuggestions([]);
-        setChartOf(null);
-        setMarket(m);
-    };
+    const [criteria, setCriteria] = useState(() => savedCriteria() || DEFAULT_CRITERIA);
+    const [snapshotAt, setSnapshotAt] = useState(null);
+    const [source, setSource] = useState(null);
+    const liveBase = useLiveApiBase();
+    const [filter, setFilter] = useState(() => { try { return localStorage.getItem('screenerFilter') || 'passing'; } catch { return 'passing'; } });
+    const [sort, setSort] = useState({ key: 'upside', dir: -1 });
+    const [selected, setSelected] = useState(null);
+    const [searchQuery, setSearchQuery] = useState('');
+    const [suggestions, setSuggestions] = useState([]);
+    const [showSuggestions, setShowSuggestions] = useState(false);
+    const [isAnalyzing, setIsAnalyzing] = useState(false);
 
-    // Top 5 opens as a full page; '#top5' in the URL lets the browser/phone
-    // back button return to the screener (and allows linking to /invest#top5).
+    // Top 5 opens as a full page; '#top5' lets the back button return here
     const [showTopPicks, setShowTopPicks] = useState(() => window.location.hash === '#top5');
-    const openTopPicks = () => {
-        if (window.location.hash !== '#top5') window.history.pushState(null, '', '#top5');
-        setShowTopPicks(true);
-    };
-    const closeTopPicks = () => {
-        if (window.location.hash === '#top5') window.history.back();
-        else setShowTopPicks(false);
-    };
+    const openTopPicks = () => { if (window.location.hash !== '#top5') window.history.pushState(null, '', '#top5'); setShowTopPicks(true); };
+    const closeTopPicks = () => { if (window.location.hash === '#top5') window.history.back(); else setShowTopPicks(false); };
     useEffect(() => {
         const onPop = () => setShowTopPicks(window.location.hash === '#top5');
         window.addEventListener('popstate', onPop);
         return () => window.removeEventListener('popstate', onPop);
     }, []);
-    const [criteria, setCriteria] = useState(() => savedCriteria() || DEFAULT_CRITERIA);
-    const [snapshotAt, setSnapshotAt] = useState(null);   // when the data was built (snapshot) or fetched (live)
-    const [source, setSource] = useState(null);           // 'live' | 'snapshot'
-    const liveBase = useLiveApiBase();
-    // Show only the stocks that pass the criteria (remembered per browser)
-    const [onlyPassing, setOnlyPassing] = useState(() => {
-        try { return localStorage.getItem('screenerOnlyPassing') !== 'false'; } catch { return true; }
-    });
-    const toggleOnlyPassing = (v) => {
-        setOnlyPassing(v);
-        try { localStorage.setItem('screenerOnlyPassing', String(v)); } catch { /* storage unavailable */ }
-    };
-    const [searchQuery, setSearchQuery] = useState("");
-    const [agentOnly, setAgentOnly] = useState(false);
-    const [isAnalyzing, setIsAnalyzing] = useState(false);
-    const [suggestions, setSuggestions] = useState([]);
-    const [showSuggestions, setShowSuggestions] = useState(false);
-    const [isSearching, setIsSearching] = useState(false);
+
+    const chooseFilter = (f) => { setFilter(f); try { localStorage.setItem('screenerFilter', f); } catch { /* ignore */ } };
 
     const fetchScreenerData = async (crit = criteria) => {
         setLoading(true);
         setError(null);
         try {
-            const { source, body } = await getData(`/api/investment/screener?market=${market}`, `screener-${market}.json`);
-            // Live or snapshot, rows carry raw metrics; statuses come from the criteria saved in this browser
+            const { source: src, body } = await getData(`/api/investment/screener?market=${market}`, `screener-${market}.json`);
             setStocks((body.data || []).map(s => applyCriteria(s, crit)));
             setSnapshotAt(body.generated_at);
-            setSource(source);
-            onSource?.(source);
+            setSource(src);
+            onSource?.(src);
         } catch (err) {
             setStocks([]);
             setError(err.message);
@@ -232,41 +302,8 @@ export default function InvestmentScreener({ onSource }) {
         }
     };
 
-    const analyzeStock = async (symbol) => {
-        if (!symbol) return;
-        setIsAnalyzing(true);
-        setError(null);
-        try {
-            if (!hasLiveApi()) {
-                throw new Error(`${symbol.toUpperCase()} isn't in the published snapshot. Analysing any symbol on demand needs live data (the "Snapshot" button at the top) — or add it to the universe in scripts/screener.py.`);
-            }
-            const data = await liveJson(`/api/investment/analyze/${encodeURIComponent(symbol.toUpperCase())}?market=${market}`);
-            data.data = applyCriteria(data.data, criteria);
-            
-            // Check if already in list and update, otherwise add
-            setStocks(prev => {
-                const existingIdx = prev.findIndex(s => s.symbol === data.data.symbol);
-                if (existingIdx >= 0) {
-                    const newStocks = [...prev];
-                    newStocks[existingIdx] = data.data;
-                    return newStocks;
-                }
-                return [data.data, ...prev];
-            });
-            setSearchQuery(""); // Clear search to show the result
-        } catch (err) {
-            setError(err.message);
-        } finally {
-            setIsAnalyzing(false);
-        }
-    };
-
-    useEffect(() => {
-        fetchScreenerData();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [market, liveBase]);
-
-    // Live data: refresh prices every minute (the server caches fundamentals, so this is cheap)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    useEffect(() => { fetchScreenerData(); }, [market, liveBase]);
     useEffect(() => {
         if (source !== 'live') return undefined;
         const id = setInterval(() => fetchScreenerData(), LIVE_REFRESH_MS);
@@ -274,392 +311,233 @@ export default function InvestmentScreener({ onSource }) {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [source, market, criteria]);
 
-    useEffect(() => {
-        if (!searchQuery || searchQuery.length < 2) {
-            setSuggestions([]);
-            setShowSuggestions(false);
-            return;
+    const analyzeStock = async (symbol) => {
+        if (!symbol) return;
+        setIsAnalyzing(true);
+        setError(null);
+        try {
+            if (!hasLiveApi()) throw new Error(`${symbol.toUpperCase()} isn't in the published list. Analysing any symbol needs live data (the Snapshot button at the top).`);
+            const data = await liveJson(`/api/investment/analyze/${encodeURIComponent(symbol.toUpperCase())}?market=${market}`);
+            const row = applyCriteria(data.data, criteria);
+            setStocks(prev => [row, ...prev.filter(s => s.symbol !== row.symbol)]);
+            setSelected(row.symbol);
+            chooseFilter('all');
+            setSearchQuery('');
+        } catch (err) {
+            setError(err.message);
+        } finally {
+            setIsAnalyzing(false);
         }
+    };
 
+    // Suggestions: the live API's search, else the loaded list
+    useEffect(() => {
+        if (searchQuery.length < 2) { setSuggestions([]); return undefined; }
         const timer = setTimeout(async () => {
-            setIsSearching(true);
             try {
                 if (hasLiveApi()) {
                     const data = await liveJson(`/api/investment/search?q=${encodeURIComponent(searchQuery)}&market=${market}`);
                     setSuggestions(data.data || []);
                 } else {
-                    const q = searchQuery.toLowerCase();   // static site: search the snapshot's stocks
-                    setSuggestions(stocks.filter(s => s.symbol.toLowerCase().includes(q) || s.name.toLowerCase().includes(q))
+                    const q = searchQuery.toLowerCase();
+                    setSuggestions(stocks.filter(s => s.symbol.toLowerCase().includes(q) || (s.name || '').toLowerCase().includes(q))
                         .slice(0, 8).map(s => ({ symbol: s.symbol, name: s.name, exchange: market === 'IN' ? 'NSE' : '' })));
                 }
-                setShowSuggestions(true);
-            } catch (err) {
-                console.error("Failed to fetch suggestions", err);
-            } finally {
-                setIsSearching(false);
-            }
-        }, 300);
-
+            } catch { setSuggestions([]); }
+        }, 250);
         return () => clearTimeout(timer);
     }, [searchQuery, market, stocks]);
 
-    const handleSuggestionClick = (symbol) => {
-        setSearchQuery(symbol);
+    const pickSuggestion = (symbol) => {
         setShowSuggestions(false);
-        // Automatically trigger analyze if it's not already in the table
-        const exists = stocks.some(s => s.symbol.toUpperCase() === symbol.toUpperCase());
-        if (!exists) {
-            analyzeStock(symbol);
-        }
+        const hit = stocks.find(s => s.symbol.toUpperCase() === symbol.toUpperCase());
+        if (hit) { setSelected(hit.symbol); setSearchQuery(''); if (!FILTERS.find(f => f[0] === filter)[2](hit)) chooseFilter('all'); }
+        else analyzeStock(symbol);
     };
 
-    const getStatusColor = (status) => {
-        if (status.includes('BUY')) return 'text-green-600 bg-green-100 dark:bg-green-900/30 dark:text-green-400';
-        if (status.includes('SELL')) return 'text-red-600 bg-red-100 dark:bg-red-900/30 dark:text-red-400';
-        return 'text-amber-600 bg-amber-100 dark:bg-amber-900/30 dark:text-amber-400';
-    };
-
-    const passingCount = stocks.filter(passesCriteria).length;
-    const filteredStocks = stocks.filter((stock) =>
-        (!agentOnly || stock.agent?.suggested) && (!onlyPassing || searchQuery || passesCriteria(stock)) && (
-        stock.symbol.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (stock.name || '').toLowerCase().includes(searchQuery.toLowerCase()))
-    );
-    const agentCount = stocks.filter(s => s.agent?.suggested).length;
-    const emptyText = stocks.length === 0 ? 'No stocks loaded.'
-        : `None of the ${stocks.length} stocks passes your criteria right now. Untick "Only stocks that pass my criteria" to see them all, or loosen the criteria.`;
+    const counts = Object.fromEntries(FILTERS.map(([k, , fn]) => [k, stocks.filter(fn).length]));
+    const q = searchQuery.trim().toLowerCase();
+    const col = COLUMNS.find(c => c[0] === sort.key);
+    const rows = stocks
+        .filter(FILTERS.find(f => f[0] === filter)?.[2] || (() => true))
+        .filter(s => !q || s.symbol.toLowerCase().includes(q) || (s.name || '').toLowerCase().includes(q))
+        .sort((a, b) => {
+            const va = col[2](a), vb = col[2](b);
+            if (va == null && vb == null) return 0;
+            if (va == null) return 1;
+            if (vb == null) return -1;
+            return (va < vb ? -1 : va > vb ? 1 : 0) * sort.dir;
+        });
+    const selStock = stocks.find(s => s.symbol === selected) || null;
+    const cur = (s) => s.currency || (market === 'IN' ? 'INR' : 'USD');
+    const toggleSort = (key) => setSort(s => (s.key === key ? { key, dir: -s.dir } : { key, dir: key === 'symbol' ? 1 : -1 }));
 
     if (showTopPicks) {
-        return (
-            <div className="flex-1 overflow-auto bg-white dark:bg-darkbg p-3 md:p-6">
-                <TopPicksPage market={market} onBack={closeTopPicks} />
-            </div>
-        );
+        return <div className="max-w-[1600px] mx-auto p-3 md:p-5"><TopPicksPage market={market} onBack={closeTopPicks} /></div>;
     }
 
     return (
-        <div className="flex-1 overflow-auto bg-white dark:bg-darkbg p-3 md:p-6">
-            <div className="w-full">
-                <DayTraderBanner />
-                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-4 md:mb-6">
-                    <div className="flex flex-col gap-2">
-                        <h1 className="text-xl md:text-2xl font-bold text-slate-800 dark:text-slate-100">Stock Investment Screener</h1>
-                        {snapshotAt && (
-                            <p className="text-[11px] text-slate-500 dark:text-slate-400" title={new Date(snapshotAt).toLocaleString()}>
-                                {source === 'live'
-                                    ? <>Live prices · updated {ageText(snapshotAt)} · refreshes every minute</>
-                                    : <>Data snapshot from {ageText(snapshotAt)} · refreshed daily by GitHub Actions from Yahoo Finance</>}
-                            </p>
-                        )}
-                        {stocks.length > 0 && (
-                            <label className="inline-flex items-center gap-2 self-start text-xs text-slate-600 dark:text-slate-300 cursor-pointer">
-                                <input type="checkbox" checked={onlyPassing} onChange={e => toggleOnlyPassing(e.target.checked)} className="w-3.5 h-3.5 accent-indigo-600" />
-                                Only stocks that pass my criteria
-                                <span className="text-slate-400">({passingCount} of {stocks.length} pass · ROE ≥ {criteria.roe_min}%, F-Score ≥ {criteria.f_score_min}, margin of safety ≥ {criteria.margin_of_safety_min}%)</span>
-                            </label>
-                        )}
-                        {/* Market toggle */}
-                        <div role="radiogroup" aria-label="Market" className="inline-flex self-start p-0.5 rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
-                            {[{ id: 'IN', label: '🇮🇳 India' }, { id: 'US', label: '🇺🇸 US' }].map(m => (
-                                <button
-                                    key={m.id}
-                                    role="radio"
-                                    aria-checked={market === m.id}
-                                    onClick={() => changeMarket(m.id)}
-                                    className={`px-3 py-1 rounded-md text-xs font-semibold transition-colors ${
-                                        market === m.id
-                                            ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-sm'
-                                            : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
-                                    }`}
-                                >
-                                    {m.label}
-                                </button>
-                            ))}
-                        </div>
-                        {market === 'IN' && stocks.some(s => s.agent) && (
-                            <label className="inline-flex items-center gap-2 self-start text-xs text-slate-600 dark:text-slate-300 cursor-pointer">
-                                <input type="checkbox" checked={agentOnly} onChange={e => setAgentOnly(e.target.checked)} className="w-3.5 h-3.5 accent-violet-600" />
-                                🤖 Agent suggested only <span className="text-slate-400">({agentCount} of {stocks.length})</span>
-                                <span className="text-slate-400 hidden md:inline">· our own model on daily candles says BUY with a tested edge; updated daily</span>
-                            </label>
-                        )}
-                    </div>
-                    <div className="flex flex-col sm:flex-row flex-wrap gap-2 w-full md:w-auto">
-                        <div className="relative flex-1 sm:flex-none">
-                            <input 
-                                type="text"
-                                placeholder="Search symbol or name..."
-                                value={searchQuery}
-                                onChange={(e) => setSearchQuery(e.target.value)}
-                                onFocus={() => {
-                                    if (suggestions.length > 0) setShowSuggestions(true);
-                                }}
-                                onBlur={() => {
-                                    // Delay hide to allow click on suggestion
-                                    setTimeout(() => setShowSuggestions(false), 200);
-                                }}
-                                className="w-full px-3 py-2 pl-8 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded text-sm text-slate-800 dark:text-slate-200 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
-                            />
-                            <svg className="w-4 h-4 text-slate-400 absolute left-2.5 top-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                            </svg>
-                            
-                            {/* Auto-suggest Dropdown */}
-                            {showSuggestions && (
-                                <div className="absolute z-10 w-full mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded shadow-lg max-h-60 overflow-y-auto">
-                                    {isSearching && suggestions.length === 0 ? (
-                                        <div className="px-4 py-2 text-sm text-slate-500">Searching...</div>
-                                    ) : suggestions.length > 0 ? (
-                                        suggestions.map((s, i) => (
-                                            <div 
-                                                key={i} 
-                                                className="px-4 py-2 hover:bg-slate-100 dark:hover:bg-slate-700 cursor-pointer border-b border-slate-100 dark:border-slate-700/50 last:border-0"
-                                                onClick={() => handleSuggestionClick(s.symbol)}
-                                            >
-                                                <div className="font-semibold text-sm text-slate-800 dark:text-slate-200">{s.symbol}</div>
-                                                <div className="text-xs text-slate-500 flex justify-between">
-                                                    <span className="truncate">{s.name}</span>
-                                                    <span className="ml-2 font-mono">{s.exchange}</span>
-                                                </div>
-                                            </div>
-                                        ))
-                                    ) : null}
-                                </div>
-                            )}
-                        </div>
-                        <button
-                            onClick={openTopPicks}
-                            className="flex-1 sm:flex-none flex justify-center items-center gap-2 px-3 py-2 bg-emerald-600 text-white rounded hover:bg-emerald-700 text-sm font-semibold transition-colors shadow-sm"
-                        >
-                            <Trophy size={16} />
-                            Top 5 to Invest
+        <div className="max-w-[1600px] mx-auto p-3 md:p-5">
+            {/* Title + actions */}
+            <div className="flex flex-wrap items-end justify-between gap-3 mb-3">
+                <div>
+                    <h1 className="text-xl md:text-2xl font-bold text-slate-900 dark:text-white">{market === 'IN' ? 'NIFTY 50' : 'US large caps'} · long-term screener</h1>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 flex items-center gap-2 flex-wrap">
+                        <span>Quality (ROE, Piotroski F-Score) + value (margin of safety to analysts’ target) + trend.</span>
+                        {snapshotAt && <span title={new Date(snapshotAt).toLocaleString()}>{source === 'live' ? 'Live prices' : 'Snapshot'} · updated {ageText(snapshotAt)}</span>}
+                        <button onClick={() => fetchScreenerData()} className="inline-flex items-center gap-1 min-h-[44px] sm:min-h-0 px-1 text-slate-500 hover:text-slate-800 dark:hover:text-slate-200" aria-label="Refresh">
+                            <RefreshCw size={12} className={loading ? 'animate-spin' : ''} /> Refresh
                         </button>
-                        <button 
-                            onClick={() => fetchScreenerData()}
-                            className="flex-1 sm:flex-none flex justify-center items-center gap-2 px-3 py-2 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded hover:bg-slate-200 dark:hover:bg-slate-700 text-sm font-semibold transition-colors"
-                        >
-                            <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
-                            Refresh
-                        </button>
-                        <button 
-                            onClick={() => setShowConfig(true)}
-                            className="flex-1 sm:flex-none flex justify-center items-center gap-2 px-3 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 text-sm font-semibold transition-colors shadow-sm"
-                        >
-                            <Settings2 size={16} />
-                            Criteria Config
-                        </button>
-                    </div>
+                    </p>
                 </div>
-
-                {error && (
-                    <div className="mb-6 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg flex items-start gap-3">
-                        <AlertCircle className="text-red-500 mt-0.5" size={20} />
-                        <div>
-                            <h3 className="text-red-800 dark:text-red-400 font-bold text-sm">Error Loading Data</h3>
-                            <p className="text-red-600 dark:text-red-500 text-xs mt-1">{error}</p>
-                        </div>
-                    </div>
-                )}
-
-                {/* Phones: the chosen stock's chart above the list */}
-                {chartOf && <div className="md:hidden mb-3"><MiniStockChart symbol={chartOf} market={market} onClose={() => setChartOf(null)} height={240} /></div>}
-
-                {/* Desktop Table View, with the chosen stock's chart beside it */}
-                <div className="hidden md:flex gap-4 items-start">
-                <div className="flex-1 min-w-0 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
-                    <div className="overflow-x-auto">
-                        <table className="w-full text-left border-collapse">
-                            <thead>
-                                <tr className="bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-800">
-                                    <th className="p-2 md:p-4 text-[10px] md:text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Symbol / Name</th>
-                                    <th className="p-2 md:p-4 text-[10px] md:text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider text-right">Price</th>
-                                    <th className="p-2 md:p-4 text-[10px] md:text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider text-right">ROE (%)<InfoTip title="ROE (Return on Equity)">{ROE_TIP}</InfoTip></th>
-                                    <th className="p-2 md:p-4 text-[10px] md:text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider text-right">F-Score<InfoTip title="F-Score (Piotroski)">{FSCORE_TIP}</InfoTip></th>
-                                    <th className="p-2 md:p-4 text-[10px] md:text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider text-right">Margin of Safety<InfoTip title="Margin of Safety">{MOS_TIP}</InfoTip></th>
-                                    <th className="p-2 md:p-4 text-[10px] md:text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Action & Timing</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {loading && stocks.length === 0 ? (
-                                    <tr>
-                                        <td colSpan="6" className="p-8 text-center text-slate-500">Loading screener data...</td>
-                                    </tr>
-                                ) : (() => {
-                                    if (filteredStocks.length === 0 && !searchQuery) {
-                                        return (
-                                            <tr>
-                                                <td colSpan="6" className="p-8 text-center text-slate-500">{emptyText}</td>
-                                            </tr>
-                                        );
-                                    }
-                                    
-                                    if (filteredStocks.length === 0) {
-                                        return (
-                                            <tr>
-                                                <td colSpan="6" className="p-8 text-center">
-                                                    <p className="text-slate-500 mb-4">No stocks in the default list match "{searchQuery}".</p>
-                                                    {searchQuery.length > 0 && (
-                                                        <button 
-                                                            onClick={() => analyzeStock(searchQuery)}
-                                                            disabled={isAnalyzing}
-                                                            className="inline-flex justify-center items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm font-semibold transition-colors disabled:opacity-50"
-                                                        >
-                                                            {isAnalyzing ? (
-                                                                <><RefreshCw size={16} className="animate-spin" /> Analyzing...</>
-                                                            ) : (
-                                                                <>Analyze "{searchQuery.toUpperCase()}"</>
-                                                            )}
-                                                        </button>
-                                                    )}
-                                                </td>
-                                            </tr>
-                                        );
-                                    }
-                                    
-                                    return filteredStocks.map((stock, idx) => (
-                                        <tr key={idx} className="border-b border-slate-100 dark:border-slate-800/50 hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors">
-                                            <td className="p-2 md:p-4">
-                                                <div className="font-bold text-slate-800 dark:text-slate-200 text-xs md:text-base flex items-center gap-1.5">{stock.symbol}<ChartLinkButton symbol={stock.symbol} market={market} compact active={chartOf === stock.symbol} onOpen={() => toggleChart(stock.symbol)} /></div>
-                                                <div className="text-[10px] md:text-xs text-slate-500 truncate max-w-[80px] md:max-w-[200px]">{stock.name}</div>
-                                            </td>
-                                            <td className="p-2 md:p-4 text-right font-mono text-xs md:text-sm text-slate-700 dark:text-slate-300">
-                                                {formatMoney(stock.current_price, stock.currency || 'INR', 2)}
-                                            </td>
-                                            <td className="p-2 md:p-4 text-right">
-                                                <span className={`text-xs md:text-sm font-semibold ${stock.roe >= (criteria.roe_min || 15) ? 'text-green-600 dark:text-green-400' : 'text-slate-700 dark:text-slate-300'}`}>
-                                                    {stock.roe.toFixed(1)}%
-                                                </span>
-                                            </td>
-                                            <td className="p-2 md:p-4 text-right">
-                                                <span className="text-xs md:text-sm font-bold text-slate-700 dark:text-slate-300">{fScoreText(stock)}</span>
-                                                {stock.f_score_note && (
-                                                    <div className="text-[9px] text-amber-600 dark:text-amber-400">{stock.f_score_note}</div>
-                                                )}
-                                            </td>
-                                            <td className="p-2 md:p-4 text-right">
-                                                <span className={`text-xs md:text-sm font-semibold ${mosClass(stock)}`}>
-                                                    {mosText(stock)}
-                                                </span>
-                                            </td>
-                                            <td className="p-2 md:p-4">
-                                                <div className="flex flex-col items-start gap-1">
-                                                    <div className="flex items-center gap-2">
-                                                        <span className={`px-2 py-1 rounded text-xs font-bold ${getStatusColor(stock.investment_status)}`}>
-                                                            {stock.investment_status}
-                                                        </span>
-                                                        <HoldingPeriod stock={stock} />
-                                                        <AgentTag stock={stock} />
-                                                    </div>
-                                                    <div className="mt-1"><AnalystTarget stock={stock} /></div>
-                                                    <span className="text-[10px] text-slate-600 dark:text-slate-400 font-semibold mt-1">
-                                                        Timing: {stock.execution_timing || "N/A"}
-                                                    </span>
-                                                    <span className="text-[11px] leading-snug text-slate-500 dark:text-slate-400 mt-0.5 max-w-md">
-                                                        <span className="font-semibold text-slate-600 dark:text-slate-300">Why: </span>{stock.action_reason}
-                                                    </span>
-                                                </div>
-                                            </td>
-                                        </tr>
-                                    ));
-                                })()}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-                {chartOf && <div className="w-[45%] shrink-0 sticky top-0"><MiniStockChart symbol={chartOf} market={market} onClose={() => setChartOf(null)} height={360} /></div>}
-                </div>
-
-                {/* Mobile Card View */}
-                <div className="md:hidden flex flex-col gap-3">
-                    {loading && stocks.length === 0 ? (
-                        <div className="p-8 text-center text-slate-500">Loading screener data...</div>
-                    ) : filteredStocks.length === 0 && !searchQuery ? (
-                        <div className="p-8 text-center text-slate-500">{emptyText}</div>
-                    ) : filteredStocks.length === 0 ? (
-                        <div className="p-8 text-center bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800">
-                            <p className="text-slate-500 mb-4">No stocks in the default list match "{searchQuery}".</p>
-                            {searchQuery.length > 0 && (
-                                <button 
-                                    onClick={() => analyzeStock(searchQuery)}
-                                    disabled={isAnalyzing}
-                                    className="inline-flex justify-center items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm font-semibold transition-colors disabled:opacity-50"
-                                >
-                                    {isAnalyzing ? (
-                                        <><RefreshCw size={16} className="animate-spin" /> Analyzing...</>
-                                    ) : (
-                                        <>Analyze "{searchQuery.toUpperCase()}"</>
-                                    )}
-                                </button>
-                            )}
-                        </div>
-                    ) : (
-                        filteredStocks.map((stock, idx) => (
-                            <div key={idx} className="bg-white dark:bg-slate-900 rounded-lg p-3 border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col gap-2 relative">
-                                <div className="flex justify-between items-start">
-                                    <div className="flex-1 pr-2">
-                                        <div className="font-bold text-slate-800 dark:text-slate-200 text-sm flex items-center gap-1.5">{stock.symbol}<ChartLinkButton symbol={stock.symbol} market={market} active={chartOf === stock.symbol} onOpen={() => { toggleChart(stock.symbol); window.scrollTo?.(0, 0); }} /></div>
-                                        <div className="text-[10px] text-slate-500 line-clamp-1">{stock.name}</div>
-                                    </div>
-                                    <div className="text-right shrink-0">
-                                        <div className="font-mono font-bold text-sm text-slate-800 dark:text-slate-200">{formatMoney(stock.current_price, stock.currency || 'INR', 2)}</div>
-                                        <span className={`px-2 py-0.5 mt-1 inline-block rounded text-[10px] font-bold ${getStatusColor(stock.investment_status)}`}>
-                                            {stock.investment_status}
-                                        </span>
-                                        <div className="mt-1"><AgentTag stock={stock} compact /></div>
-                                    </div>
-                                </div>
-                                
-                                <div className="grid grid-cols-3 gap-2 py-2 border-y border-slate-100 dark:border-slate-800/80 mt-1">
-                                    <div className="flex flex-col">
-                                        <span className="text-[9px] text-slate-400 uppercase tracking-wider mb-0.5">ROE<InfoTip title="ROE (Return on Equity)">{ROE_TIP}</InfoTip></span>
-                                        <span className={`text-xs font-semibold ${stock.roe >= (criteria.roe_min || 15) ? 'text-green-600 dark:text-green-400' : 'text-slate-700 dark:text-slate-300'}`}>
-                                            {stock.roe.toFixed(1)}%
-                                        </span>
-                                    </div>
-                                    <div className="flex flex-col text-center border-x border-slate-100 dark:border-slate-800/80 px-1">
-                                        <span className="text-[9px] text-slate-400 uppercase tracking-wider mb-0.5">F-Score<InfoTip title="F-Score (Piotroski)">{FSCORE_TIP}</InfoTip></span>
-                                        <span className="text-xs font-bold text-slate-700 dark:text-slate-300">{fScoreText(stock)}</span>
-                                        {stock.f_score_note && <span className="text-[9px] text-amber-600 dark:text-amber-400">{stock.f_score_note}</span>}
-                                    </div>
-                                    <div className="flex flex-col text-right">
-                                        <span className="text-[9px] text-slate-400 uppercase tracking-wider mb-0.5">Margin of Safety<InfoTip title="Margin of Safety">{MOS_TIP}</InfoTip></span>
-                                        <span className={`text-xs font-semibold ${mosClass(stock)}`}>
-                                            {mosText(stock)}
-                                        </span>
-                                    </div>
-                                </div>
-                                
-                                <div className="flex flex-col gap-1.5 mt-1 bg-slate-50 dark:bg-slate-800/40 p-2.5 rounded border border-slate-100 dark:border-slate-700/30">
-                                    <div className="flex justify-between items-center text-[10px] text-slate-600 dark:text-slate-400 font-medium">
-                                        <span className="flex items-center gap-1">
-                                            <span className="w-1.5 h-1.5 rounded-full bg-slate-300 dark:bg-slate-600"></span>
-                                            Timing: {stock.execution_timing || "N/A"}
-                                        </span>
-                                    </div>
-                                    <div className="flex flex-col items-start gap-1.5">
-                                        <HoldingPeriod stock={stock} compact />
-                                        <AnalystTarget stock={stock} />
-                                    </div>
-                                    <div className="text-[11px] text-slate-700 dark:text-slate-300 italic mt-0.5 leading-relaxed">
-                                        <strong>Why:</strong> {stock.action_reason || "No explanation available for this stock."}
-                                    </div>
-                                </div>
-                            </div>
-                        ))
-                    )}
+                <div className="flex gap-2">
+                    <button onClick={openTopPicks} className="inline-flex items-center gap-1.5 h-11 sm:h-9 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold">
+                        <Trophy size={15} /> Top 5 to invest
+                    </button>
+                    <button onClick={() => setShowConfig(true)} aria-label="My criteria" className="inline-flex items-center justify-center gap-1.5 h-11 min-w-[44px] sm:h-9 px-3 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 text-sm font-semibold">
+                        <Settings2 size={15} /> <span className="hidden sm:inline">My criteria</span>
+                    </button>
                 </div>
             </div>
 
+            {/* Summary tiles double as filters */}
+            <div className="grid grid-cols-3 sm:grid-cols-5 gap-2 mb-3" role="tablist" aria-label="Filter">
+                {FILTERS.map(([key, label]) => (
+                    <button key={key} role="tab" aria-selected={filter === key} onClick={() => chooseFilter(key)}
+                        className={`text-left rounded-xl border px-3 py-2 transition-colors ${filter === key
+                            ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-500/10' : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-cardbg hover:border-slate-300 dark:hover:border-slate-600'}`}>
+                        <div className="text-xl font-bold font-mono text-slate-900 dark:text-white">{loading && !stocks.length ? '·' : counts[key]}</div>
+                        <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 truncate">{label}</div>
+                    </button>
+                ))}
+            </div>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400 mb-3">
+                Your criteria: ROE ≥ {criteria.roe_min}% · F-Score ≥ {criteria.f_score_min}/9 · margin of safety ≥ {criteria.margin_of_safety_min}%.
+                {' '}<b>Buy now</b> = passes and the trend is up; <b>Buy on dip</b> = passes, wait for the trend.
+            </p>
+
+            {/* Search */}
+            <div className="relative mb-3 max-w-md">
+                <Search size={15} className="absolute left-2.5 top-3.5 sm:top-2.5 text-slate-400" />
+                <input value={searchQuery} onChange={e => { setSearchQuery(e.target.value); setShowSuggestions(true); }}
+                    onBlur={() => setTimeout(() => setShowSuggestions(false), 150)} onFocus={() => setShowSuggestions(true)}
+                    onKeyDown={e => { if (e.key === 'Enter' && searchQuery.trim()) pickSuggestion(suggestions[0]?.symbol || searchQuery.trim()); }}
+                    placeholder={`Find a stock (${market === 'IN' ? 'e.g. RELIANCE, TCS' : 'e.g. AAPL, NVDA'})`}
+                    className="w-full h-11 sm:h-9 pl-8 pr-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm focus:outline-none focus:ring-1 focus:ring-emerald-500" />
+                {showSuggestions && suggestions.length > 0 && (
+                    <div className="absolute z-20 w-full mt-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-lg max-h-64 overflow-y-auto">
+                        {suggestions.map(sg => (
+                            <button key={sg.symbol} onMouseDown={() => pickSuggestion(sg.symbol)} className="w-full text-left px-3 py-2 hover:bg-slate-100 dark:hover:bg-slate-800 flex justify-between gap-2">
+                                <span className="font-semibold text-sm">{sg.symbol}</span><span className="text-xs text-slate-500 truncate">{sg.name}</span>
+                            </button>
+                        ))}
+                    </div>
+                )}
+                {isAnalyzing && <p className="text-xs text-slate-500 mt-1">Analysing…</p>}
+            </div>
+
+            {error && (
+                <div className="mb-3 p-3 rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 text-sm text-red-700 dark:text-red-400 flex gap-2">
+                    <AlertCircle size={17} className="shrink-0" /> {error}
+                </div>
+            )}
+
+            <div className="flex gap-4 items-start">
+                {/* Table (desktop) */}
+                <div className="flex-1 min-w-0">
+                    <div className="hidden md:block rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-cardbg overflow-x-auto">
+                        <table className="w-full text-sm">
+                            <thead>
+                                <tr className="border-b border-slate-200 dark:border-slate-800 text-[11px] uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                                    {COLUMNS.map(([key, label, , align, tip]) => (
+                                        <th key={key} className={`px-3 py-2.5 font-semibold whitespace-nowrap ${align === 'right' ? 'text-right' : 'text-left'}`}>
+                                            <button onClick={() => toggleSort(key)} className="inline-flex items-center gap-1 hover:text-slate-800 dark:hover:text-slate-200" aria-label={`Sort by ${label}`}>
+                                                {label}{sort.key === key ? (sort.dir < 0 ? <ArrowDown size={11} /> : <ArrowUp size={11} />) : <ArrowUpDown size={11} className="opacity-40" />}
+                                            </button>
+                                            {tip && typeof tip !== 'string' && <InfoTip title={label}>{tip}</InfoTip>}
+                                        </th>
+                                    ))}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {loading && !stocks.length ? (
+                                    <tr><td colSpan={COLUMNS.length} className="p-8 text-center text-slate-500">Loading…</td></tr>
+                                ) : rows.length === 0 ? (
+                                    <tr><td colSpan={COLUMNS.length} className="p-8 text-center text-slate-500">
+                                        {q ? <>No match for “{searchQuery}”. <button className="underline" onClick={() => analyzeStock(searchQuery)}>Analyse {searchQuery.toUpperCase()}</button></>
+                                            : stocks.length ? <>Nothing in “{FILTERS.find(f => f[0] === filter)[1]}” right now. <button className="underline" onClick={() => chooseFilter('all')}>Show all {stocks.length}</button></> : 'No stocks loaded.'}
+                                    </td></tr>
+                                ) : rows.map(s => (
+                                    <tr key={s.symbol} onClick={() => setSelected(sel => (sel === s.symbol ? null : s.symbol))}
+                                        className={`cursor-pointer border-b border-slate-100 dark:border-slate-800/60 ${selected === s.symbol ? 'bg-emerald-50 dark:bg-emerald-500/10' : 'hover:bg-slate-50 dark:hover:bg-slate-800/40'}`}>
+                                        <td className="px-3 py-2">
+                                            <div className="font-bold text-slate-900 dark:text-white">{s.symbol}</div>
+                                            <div className="text-[11px] text-slate-500 truncate max-w-[180px]">{s.name}</div>
+                                        </td>
+                                        <td className="px-3 py-2 text-right font-mono">{formatMoney(s.current_price, cur(s), 2)}</td>
+                                        <td className="px-3 py-2"><StatusBadge status={s.investment_status} /></td>
+                                        <td className={`px-3 py-2 text-right font-mono ${s.upside_pct > 0 ? 'text-green-600 dark:text-green-400' : s.upside_pct < 0 ? 'text-red-600 dark:text-red-400' : 'text-slate-400'}`}>{pctText(s.upside_pct)}</td>
+                                        <td className={`px-3 py-2 text-right font-mono ${mosClass(s)}`}>{mosText(s)}</td>
+                                        <td className={`px-3 py-2 text-right font-mono ${s.roe >= criteria.roe_min ? 'text-green-600 dark:text-green-400' : ''}`}>{s.roe != null ? `${s.roe.toFixed(1)}%` : '—'}</td>
+                                        <td className="px-3 py-2 text-right font-mono">{fScoreText(s)}</td>
+                                        <td className="px-3 py-2"><Trend stock={s} /></td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+
+                    {/* Cards (phone) */}
+                    <div className="md:hidden flex flex-col gap-2">
+                        <div className="flex items-center gap-2 text-xs text-slate-500">
+                            Sort
+                            <select value={sort.key} onChange={e => setSort({ key: e.target.value, dir: e.target.value === 'symbol' ? 1 : -1 })}
+                                className="h-11 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 text-sm">
+                                {COLUMNS.map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+                            </select>
+                        </div>
+                        {loading && !stocks.length && <div className="p-6 text-center text-slate-500">Loading…</div>}
+                        {!loading && rows.length === 0 && <div className="p-6 text-center text-slate-500">Nothing here. <button className="underline" onClick={() => chooseFilter('all')}>Show all</button></div>}
+                        {rows.map(s => (
+                            <button key={s.symbol} onClick={() => setSelected(s.symbol)}
+                                className="text-left rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-cardbg p-3 active:bg-slate-50 dark:active:bg-slate-800">
+                                <div className="flex items-start justify-between gap-2">
+                                    <div className="min-w-0"><div className="font-bold text-slate-900 dark:text-white">{s.symbol}</div><div className="text-[11px] text-slate-500 truncate">{s.name}</div></div>
+                                    <div className="text-right"><div className="font-mono font-bold">{formatMoney(s.current_price, cur(s), 2)}</div><StatusBadge status={s.investment_status} /></div>
+                                </div>
+                                <div className="mt-2 grid grid-cols-4 gap-1 text-[11px]">
+                                    <span><span className="text-slate-500">Upside </span><b className={s.upside_pct > 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}>{pctText(s.upside_pct, 0)}</b></span>
+                                    <span><span className="text-slate-500">MoS </span><b className={mosClass(s)}>{hasMos(s) ? `${Math.round(s.margin_of_safety)}%` : 'N/A'}</b></span>
+                                    <span><span className="text-slate-500">ROE </span><b>{s.roe != null ? `${Math.round(s.roe)}%` : '—'}</b></span>
+                                    <span><span className="text-slate-500">F </span><b>{fScoreText(s)}</b></span>
+                                </div>
+                            </button>
+                        ))}
+                    </div>
+                </div>
+
+                {/* Detail: side panel on desktop */}
+                {selStock && (
+                    <aside className="hidden md:block w-[440px] shrink-0 sticky top-16 max-h-[calc(100dvh-5rem)] overflow-y-auto rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-cardbg p-4">
+                        <StockDetail stock={selStock} market={market} onClose={() => setSelected(null)} />
+                    </aside>
+                )}
+            </div>
+            {!selStock && rows.length > 0 && <p className="hidden md:block mt-2 text-[11px] text-slate-500 dark:text-slate-400">Click a stock for its chart, the reasoning and the analysts’ target. Click a column to sort.</p>}
+
+            {/* Detail: bottom sheet on phones */}
+            {selStock && (
+                <div className="md:hidden fixed inset-0 z-40 flex flex-col justify-end bg-black/40" onClick={() => setSelected(null)}>
+                    <div className="max-h-[88dvh] overflow-y-auto rounded-t-2xl bg-white dark:bg-cardbg px-4 pb-6 pt-2 pb-safe" onClick={e => e.stopPropagation()}>
+                        <div className="mx-auto mb-3 h-1.5 w-10 rounded-full bg-slate-300 dark:bg-slate-600" aria-hidden="true" />
+                        <StockDetail stock={selStock} market={market} onClose={() => setSelected(null)} />
+                    </div>
+                </div>
+            )}
+
             {showConfig && (
-                <CriteriaConfigModal 
-                    currentCriteria={criteria} 
-                    onClose={() => setShowConfig(false)} 
-                    onSave={(newCrit) => {
-                        setCriteria(newCrit);
-                        setShowConfig(false);
-                        fetchScreenerData(newCrit); // re-screen with the new criteria
-                    }} 
-                />
+                <CriteriaConfigModal currentCriteria={criteria} onClose={() => setShowConfig(false)}
+                    onSave={(c) => { setCriteria(c); setShowConfig(false); fetchScreenerData(c); }} />
             )}
         </div>
     );
