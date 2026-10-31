@@ -15,12 +15,20 @@ Endpoints (all GET, JSON):
     /api/investment/search?q=&market=
     /api/investment/criteria                  default criteria (the browser applies them)
     /api/history?symbol=<YAHOO SYMBOL>        daily candles
+
+  Day Trader desk (runs the day-trader-skill in vendor/, see scripts/skill_desk.py):
+    /api/desk                                 scanner, entry, exit, Time Machine, news, analyst, congress (cached 60 s)
+    /api/desk/bars?symbol=                    today's and recent 5-minute bars
+    /api/desk/plan?symbol=&target=2R&stop=or-mid    re-plan one breakout (exit + Time Machine)
+    POST /api/desk/size-risk {plan, settings} trader-budget + trader-risk with your budget and limits
 """
 import argparse
 import json
 import os
 import re
+import shutil
 import sys
+import tempfile
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -32,12 +40,15 @@ import pandas as pd
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'scripts'))
 
 import screener  # noqa: E402
+import skill_desk  # noqa: E402
 from build_data import CRITERIA  # noqa: E402
 from common import now_iso  # noqa: E402
 
 FUNDAMENTALS_TTL = 12 * 3600
 PRICE_TTL = 60
+DESK_TTL = 60
 ALLOWED_ORIGIN = os.environ.get('ALLOWED_ORIGIN', '*')
+RULE_RE = re.compile(r'^(\d+(\.\d+)?R|price:\d+(\.\d+)?|or-mid|or-low|pct:\d+(\.\d+)?|atr:\d+(\.\d+)?)$')
 SYMBOL_RE = re.compile(r'^[A-Z0-9.\-&^=]{1,20}$')
 
 
@@ -57,6 +68,57 @@ class TTLCache:
 
 
 cache = TTLCache()
+
+_desk_lock = threading.Lock()
+_desk_dir = {'path': None}          # work folder of the newest desk build (its charts are reused)
+
+
+def desk():
+    """The whole desk, rebuilt from live Yahoo bars at most once a minute."""
+    def build():
+        with _desk_lock:
+            work = tempfile.mkdtemp(prefix='desk-')
+            doc, bars = skill_desk.build_desk(work, log=lambda *_: None)
+            old, _desk_dir['path'] = _desk_dir['path'], work
+            if old:
+                shutil.rmtree(old, ignore_errors=True)
+            return dict(doc, generated_at=now_iso(), live=True), bars
+    return cache.get(('desk',), DESK_TTL, build)
+
+
+def chart_path(sym):
+    """A 60-day chart for one symbol: from the newest desk build, else fetched now."""
+    desk()
+    path = os.path.join(_desk_dir['path'], 'charts', f'{sym}.json')
+    if not os.path.exists(path):
+        text = cache.get(('chart', sym), DESK_TTL, lambda: skill_desk.fetch_chart(sym))
+        with open(path, 'w') as f:
+            f.write(text)
+    return path
+
+
+def desk_bars(sym):
+    with open(chart_path(sym)) as f:
+        return skill_desk.compact_bars(f.read())
+
+
+def replan(sym, target, stop):
+    doc, _ = desk()
+    with tempfile.TemporaryDirectory() as work:
+        skill_desk.write_config(work)
+        return skill_desk.plan_symbol(work, sym, chart_path(sym), doc['as_of'], target=target, stop=stop)
+
+
+def size_risk(body):
+    plan, settings = body.get('plan'), body.get('settings') or {}
+    if not isinstance(plan, dict) or not isinstance(settings, dict):
+        raise ValueError('plan and settings must be objects')
+    clean = {}
+    for k, v in settings.items():
+        if k in skill_desk.DEFAULT_CONFIG and isinstance(v, (int, float, str, bool)) and not isinstance(skill_desk.DEFAULT_CONFIG[k], list):
+            clean[k] = v
+    with tempfile.TemporaryDirectory() as work:     # on the desk's clock, like the plan it sizes
+        return skill_desk.size_and_check(work, plan, clean, desk()[0]['as_of'])
 
 
 def analyzed(symbol, market):
@@ -138,7 +200,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header('Content-Type', 'application/json')
         self.send_header('Access-Control-Allow-Origin', ALLOWED_ORIGIN)
-        self.send_header('Access-Control-Allow-Methods', 'GET, OPTIONS')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
         self.send_header('Cache-Control', 'no-store')
         self.send_header('Content-Length', str(len(data)))
@@ -176,9 +238,34 @@ class Handler(BaseHTTPRequestHandler):
                 market_of = 'IN' if ysym.endswith('.NS') else 'US'
                 base = ysym.removesuffix('.NS') if market_of == 'IN' else ysym
                 return self._send(200, analyzed(base, market_of)[1])
+            if path == '/api/desk':
+                return self._send(200, desk()[0])
+            if path in ('/api/desk/bars', '/api/desk/plan'):
+                sym = q.get('symbol', '').upper()
+                if not SYMBOL_RE.match(sym):
+                    return self._send(400, {'detail': 'Invalid symbol'})
+                if path == '/api/desk/bars':
+                    return self._send(200, {'symbol': sym, 'bars': desk_bars(sym)})
+                target, stop = q.get('target', skill_desk.TARGET), q.get('stop', skill_desk.STOP)
+                if not (RULE_RE.match(target) and RULE_RE.match(stop)):
+                    return self._send(400, {'detail': 'Invalid target or stop rule'})
+                return self._send(200, replan(sym, target, stop))
             return self._send(404, {'detail': 'Not found'})
         except Exception as e:
             return self._send(502, {'detail': f'Upstream data error: {e}'})
+
+    def do_POST(self):
+        if urlparse(self.path).path.rstrip('/') != '/api/desk/size-risk':
+            return self._send(404, {'detail': 'Not found'})
+        try:
+            n = int(self.headers.get('Content-Length') or 0)
+            if n > 64 * 1024:
+                return self._send(413, {'detail': 'Too large'})
+            return self._send(200, size_risk(json.loads(self.rfile.read(n) or b'{}')))
+        except (ValueError, TypeError) as e:
+            return self._send(400, {'detail': str(e)})
+        except Exception as e:
+            return self._send(502, {'detail': f'Skill error: {e}'})
 
     def log_message(self, fmt, *args):
         sys.stderr.write('%s %s\n' % (self.log_date_time_string(), fmt % args))

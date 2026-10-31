@@ -18,7 +18,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'server'))
 
 import live_api  # noqa: E402
 import screener  # noqa: E402
-from test_build_data import FakeTicker  # noqa: E402
+import skill_desk  # noqa: E402
+from test_build_data import REEL_CHART, FakeTicker, reel_desk  # noqa: E402
 
 
 def fake_download(symbols, **kw):
@@ -74,6 +75,28 @@ class LiveApiTest(unittest.TestCase):
         self.assertEqual(bars[-1]['time'], '2026-10-30')
         _, _, body = self.get('/api/investment/analyze/NVDA?market=US')
         self.assertEqual(body['data']['current_price'], 160.0)
+
+    def post(self, path, body):
+        req = urllib.request.Request(self.base + path, data=json.dumps(body).encode(), method='POST',
+                                     headers={'Content-Type': 'application/json'})
+        with urllib.request.urlopen(req) as r:
+            return json.loads(r.read())
+
+    def test_desk_runs_the_skill(self):
+        with mock.patch.object(skill_desk, 'build_desk', lambda work, log=None: reel_desk(work)), \
+                mock.patch.object(skill_desk, 'fetch_chart', lambda sym: skill_desk.read_chart(REEL_CHART)):
+            _, _, d = self.get('/api/desk')
+            self.assertTrue(d['live'])
+            self.assertEqual(d['plans']['TSLA']['plan']['stop'], 358.32)
+            _, _, bars = self.get('/api/desk/bars?symbol=TSLA')
+            self.assertGreater(len(bars['bars']), 4000)
+            _, _, p = self.get('/api/desk/plan?symbol=TSLA&target=1R&stop=or-mid')
+            self.assertEqual(p['timemachine']['mc']['p_target'], 0.2938)
+            r = self.post('/api/desk/size-risk', {'plan': p['plan'], 'settings': {'budget': 5000, 'max_loss_per_trade_usd': 50}})
+            self.assertEqual(r['sizing']['qty'], 8)
+            with self.assertRaises(urllib.error.HTTPError) as e:
+                self.get('/api/desk/plan?symbol=TSLA&target=rm%20-rf')
+            self.assertEqual(e.exception.code, 400)
 
     def test_rejects_bad_symbols(self):
         with self.assertRaises(urllib.error.HTTPError) as e:

@@ -46,9 +46,15 @@ jobs:
           cache: 'pip'
           cache-dependency-path: scripts/requirements.txt
       - name: Install data job dependencies
-        run: pip install -r scripts/requirements.txt
-      - name: Test data job
-        run: python -m unittest discover -s scripts
+        run: |
+          pip install -r scripts/requirements.txt
+          sudo apt-get install -y --no-install-recommends poppler-utils   # pdftotext: Congress PTRs row by row
+      - name: Test the day-trader-skill and the data job
+        env:
+          SEC_USER_AGENT: FinEngine CI (github.com/${{ github.repository }}) ${{ github.repository_owner }}@users.noreply.github.com
+        run: |
+          python -m unittest discover -s vendor/day-trader-skill/tests
+          python -m unittest discover -s scripts
       # Fundamentals are rebuilt once a day; the previous run's data is reused in between
       - name: Restore data cache
         uses: actions/cache/restore@v4

@@ -51,16 +51,22 @@ def build_screener(cache_dir, force):
 
 
 def build_desk(cache_dir):
-    import daytrader
-    log(f'desk: {", ".join(daytrader.WATCHLIST)}')
-    desk, intraday = daytrader.build(log)
+    """The Day Trader desk, from the day-trader-skill's own tools (scripts/skill_desk.py)."""
+    import tempfile
+    import skill_desk
     dest = os.path.join(cache_dir, 'desk')
-    if not desk['scanner'] and os.path.exists(os.path.join(dest, 'daytrader.json')):
-        log('desk: no prices fetched, keeping the previous snapshot')
-        return
+    with tempfile.TemporaryDirectory() as work:
+        try:
+            desk, bars = skill_desk.build_desk(work, log=log)
+        except Exception as e:
+            if os.path.exists(os.path.join(dest, 'daytrader.json')):
+                log(f'desk: {e}; keeping the previous snapshot')
+                return
+            raise
     desk['generated_at'] = now_iso()
-    for sym, data in intraday.items():
-        write_json(os.path.join(dest, 'intraday', f'{sym}.json'), data)
+    shutil.rmtree(os.path.join(dest, 'intraday'), ignore_errors=True)
+    for sym, rows in bars.items():
+        write_json(os.path.join(dest, 'intraday', f'{sym}.json'), {'symbol': sym, 'bars': rows})
     write_json(os.path.join(dest, 'daytrader.json'), desk)
 
 
