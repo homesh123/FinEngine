@@ -70,6 +70,24 @@ def build_desk(cache_dir):
     write_json(os.path.join(dest, 'daytrader.json'), desk)
 
 
+def build_india_desk(cache_dir):
+    """The NSE desk: the skill's rules on NSE hours (scripts/market_desk.py)."""
+    import market_desk
+    dest = os.path.join(cache_dir, 'desk')
+    try:
+        desk, bars = market_desk.build_india_desk(log=log)
+    except Exception as e:
+        if os.path.exists(os.path.join(dest, 'daytrader-IN.json')):
+            log(f'india desk: {e}; keeping the previous snapshot')
+            return
+        raise
+    desk['generated_at'] = now_iso()
+    shutil.rmtree(os.path.join(dest, 'intraday-IN'), ignore_errors=True)
+    for sym, rows in bars.items():
+        write_json(os.path.join(dest, 'intraday-IN', f'{sym}.json'), {'symbol': sym, 'bars': rows})
+    write_json(os.path.join(dest, 'daytrader-IN.json'), desk)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--out', default='public/data')
@@ -90,10 +108,11 @@ def main():
         if os.path.isdir(src):     # publish the cached fundamentals into the site
             shutil.copytree(src, a.out, dirs_exist_ok=True, ignore=shutil.ignore_patterns('built.txt'))
     if a.only != 'screener':
-        try:
-            build_desk(cache)
-        except Exception as e:
-            log(f'desk failed: {e}')
+        for name, job in (('desk', build_desk), ('india desk', build_india_desk)):
+            try:
+                job(cache)
+            except Exception as e:
+                log(f'{name} failed: {e}')
         src = os.path.join(cache, 'desk')
         if os.path.isdir(src):
             shutil.copytree(src, a.out, dirs_exist_ok=True)

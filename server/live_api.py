@@ -21,6 +21,8 @@ Endpoints (all GET, JSON):
     /api/desk/bars?symbol=                    today's and recent 5-minute bars
     /api/desk/plan?symbol=&target=2R&stop=or-mid    re-plan one breakout (exit + Time Machine)
     POST /api/desk/size-risk {plan, settings} trader-budget + trader-risk with your budget and limits
+    add market=IN to /api/desk, /api/desk/bars and /api/desk/plan for the NSE desk (scripts/market_desk.py);
+    India sizing and the risk check run in the browser (src/utils/dayTrader.js, same rules)
 """
 import argparse
 import json
@@ -29,6 +31,7 @@ import re
 import shutil
 import sys
 import tempfile
+from datetime import datetime, timezone
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -40,6 +43,7 @@ import pandas as pd
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'scripts'))
 
 import screener  # noqa: E402
+import market_desk  # noqa: E402
 import skill_desk  # noqa: E402
 from build_data import CRITERIA  # noqa: E402
 from common import now_iso  # noqa: E402
@@ -84,6 +88,44 @@ def desk():
                 shutil.rmtree(old, ignore_errors=True)
             return dict(doc, generated_at=now_iso(), live=True), bars
     return cache.get(('desk',), DESK_TTL, build)
+
+
+_in_charts = {}                     # NSE charts of the newest India desk build
+
+
+def india_desk():
+    """The NSE desk (the skill's rules on NSE hours), rebuilt at most once a minute."""
+    def build():
+        doc, bars = market_desk.build_india_desk(log=lambda *_: None, keep_charts=_in_charts)
+        return dict(doc, generated_at=now_iso(), live=True), bars
+    return cache.get(('desk', 'IN'), DESK_TTL, build)
+
+
+def india_chart(sym):
+    india_desk()
+    if sym not in _in_charts:
+        _in_charts[sym] = cache.get(('chart', sym + '.NS'), DESK_TTL, lambda: skill_desk.fetch_chart(sym + '.NS'))
+    return _in_charts[sym]
+
+
+def india_bars(sym):
+    s = market_desk.NSE
+    return skill_desk.compact_bars_tz(india_chart(sym), s.zone, s.open_min, s.close_min)
+
+
+def india_replan(sym, target, stop):
+    doc, _ = india_desk()
+    entry = (doc['plans'].get(sym) or {}).get('entry')
+    if not entry or entry.get('status') != 'triggered':
+        raise ValueError(f'{sym} has no triggered breakout on this desk')
+    if not re.fullmatch(r'\d+(\.\d+)?R', target) or stop not in ('or-mid', 'or-low'):
+        raise ValueError('India re-plans take an R target and an or-mid / or-low stop')
+    s = market_desk.NSE
+    p = market_desk.plan(entry, s, stop, target)
+    if 'refused' in p:
+        raise ValueError(p['refused'])
+    bars = market_desk.parse_chart(india_chart(sym), s, datetime.now(timezone.utc))
+    return {'symbol': sym, 'entry': entry, 'plan': p, 'timemachine': market_desk.time_machine(bars, p, s)}
 
 
 def chart_path(sym):
@@ -239,16 +281,21 @@ class Handler(BaseHTTPRequestHandler):
                 base = ysym.removesuffix('.NS') if market_of == 'IN' else ysym
                 return self._send(200, analyzed(base, market_of)[1])
             if path == '/api/desk':
-                return self._send(200, desk()[0])
+                return self._send(200, (india_desk() if market == 'IN' else desk())[0])
             if path in ('/api/desk/bars', '/api/desk/plan'):
                 sym = q.get('symbol', '').upper()
                 if not SYMBOL_RE.match(sym):
                     return self._send(400, {'detail': 'Invalid symbol'})
                 if path == '/api/desk/bars':
-                    return self._send(200, {'symbol': sym, 'bars': desk_bars(sym)})
+                    return self._send(200, {'symbol': sym, 'bars': india_bars(sym) if market == 'IN' else desk_bars(sym)})
                 target, stop = q.get('target', skill_desk.TARGET), q.get('stop', skill_desk.STOP)
                 if not (RULE_RE.match(target) and RULE_RE.match(stop)):
                     return self._send(400, {'detail': 'Invalid target or stop rule'})
+                if market == 'IN':
+                    try:
+                        return self._send(200, india_replan(sym, target, stop))
+                    except ValueError as e:
+                        return self._send(400, {'detail': str(e)})
                 return self._send(200, replan(sym, target, stop))
             return self._send(404, {'detail': 'Not found'})
         except Exception as e:
@@ -275,7 +322,8 @@ def warm(every=DESK_TTL - 5):
     """Keep the desk and the screeners built in the background, so requests answer at once."""
     def loop():
         while True:
-            for name, job in (('desk', desk), ('screener US', lambda: screener_rows('US')), ('screener IN', lambda: screener_rows('IN'))):
+            for name, job in (('desk', desk), ('desk IN', india_desk), ('screener US', lambda: screener_rows('US')),
+                              ('screener IN', lambda: screener_rows('IN'))):
                 try:
                     job()
                 except Exception as e:      # an outage must not stop the loop
