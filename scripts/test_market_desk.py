@@ -126,3 +126,80 @@ class IndiaDeskTest(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class UpstoxViaTradeSagarTest(unittest.TestCase):
+    """The India desk takes Upstox candles from TradeSagar's backend for the days they
+    cover, keeps Yahoo for older sessions, and falls back to Yahoo when Upstox isn't there."""
+
+    def setUp(self):
+        import threading
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+        from unittest import mock
+        nse = as_nse(REEL_TEXT)
+        res = json.loads(nse)['chart']['result'][0]
+        q = res['indicators']['quote'][0]
+        day = lambda t: datetime.fromtimestamp(t, md.NSE.zone).date().isoformat()
+        # Upstox's copy of 19 Oct: every price 1.00 higher, so we can tell which source won
+        self.candles = [{'time': t * 1000, 'open': q['open'][i] + 1, 'high': q['high'][i] + 1, 'low': q['low'][i] + 1,
+                         'close': q['close'][i] + 1, 'volume': q['volume'][i]}
+                        for i, t in enumerate(res['timestamp']) if t and day(t) == '2026-10-19' and q['close'][i] is not None]
+        test, state = self, {'connected': True}
+        self.state = state
+
+        class TradeSagar(BaseHTTPRequestHandler):
+            def do_GET(self):
+                if self.headers.get('X-Trade-Token') != 'secret':
+                    body, code = {'detail': 'bad token'}, 401
+                elif self.path.startswith('/api/upstox/status'):
+                    body, code = {'connected': state['connected'], 'user_name': 'H'}, 200
+                elif self.path.startswith('/api/upstox/history') and 'symbol=NSE%3ATSLA' in self.path and 'interval=5min' in self.path:
+                    body, code = test.candles, 200
+                else:
+                    body, code = {'detail': 'not found'}, 404
+                data = json.dumps(body).encode()
+                self.send_response(code)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(data)
+
+            def log_message(self, *a):
+                pass
+
+        self.srv = ThreadingHTTPServer(('127.0.0.1', 0), TradeSagar)
+        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+        self.patches = [mock.patch.object(md, 'TRADESAGAR_API', f'http://127.0.0.1:{self.srv.server_address[1]}'),
+                        mock.patch.dict(os.environ, {'TRADESAGAR_TOKEN': 'secret'}),
+                        mock.patch.object(md, 'fetch_chart', lambda ysym, pause=1.0: nse)]
+        for p in self.patches:
+            p.start()
+
+    def tearDown(self):
+        for p in self.patches:
+            p.stop()
+        self.srv.shutdown()
+
+    def build(self):
+        return md.build_india_desk(symbols=['TSLA'], now=datetime(2026, 10, 19, 10, 0, tzinfo=md.NSE.zone), news=False,
+                                   log=lambda *_: None)[0]
+
+    def test_upstox_bars_win_for_today_and_yahoo_keeps_the_history(self):
+        desk = self.build()
+        self.assertEqual(desk['data_source'], 'Upstox (via TradeSagar) + Yahoo history')
+        self.assertTrue(desk['upstox']['connected'])
+        self.assertEqual(desk['scan']['hits'][0]['price'], 365.18)                 # Upstox's +1.00 close
+        self.assertEqual(desk['plans']['TSLA']['timemachine']['history']['sessions'], 59)   # Yahoo's older sessions
+
+    def test_logged_out_falls_back_to_yahoo(self):
+        self.state['connected'] = False
+        desk = self.build()
+        self.assertEqual(desk['data_source'], 'Yahoo Finance')
+        self.assertIn('not logged in', desk['upstox']['reason'])
+        self.assertEqual(desk['scan']['hits'][0]['price'], 364.18)
+
+    def test_tradesagar_down_falls_back_to_yahoo(self):
+        self.srv.shutdown()
+        self.srv.server_close()
+        desk = self.build()
+        self.assertEqual(desk['data_source'], 'Yahoo Finance')
+        self.assertIn('unreachable', desk['upstox']['reason'])

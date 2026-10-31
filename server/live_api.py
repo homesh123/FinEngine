@@ -104,7 +104,7 @@ def india_desk():
 def india_chart(sym):
     india_desk()
     if sym not in _in_charts:
-        _in_charts[sym] = cache.get(('chart', sym + '.NS'), DESK_TTL, lambda: market_desk.fetch_chart(sym + '.NS'))
+        _in_charts[sym] = cache.get(('chart', sym + '.NS'), DESK_TTL, lambda: market_desk.india_chart(sym, log=lambda *_: None)[0])
     return _in_charts[sym]
 
 

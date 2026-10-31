@@ -335,6 +335,34 @@ server".
   risk PASS, paper order, India switch (₹, 170 shares), market kept across pages, bottom tabs.
 - The "UI UX Pro Max" skill isn't installed in this environment; the review followed Apple's guidelines directly.
 
+## 6c. Indian stocks: the `.NS` fix and Upstox via TradeSagar (31 Oct)
+
+**`.NS` fix (PR #5).** After #3 the India desk published nothing: Yahoo answered 404 for every NSE stock. The skill's
+Yahoo client turns `.` into `-` for US class shares (BRK.B → BRK-B), so `RELIANCE.NS` became `RELIANCE-NS`. The India desk
+now uses its own fetcher, `market_desk.fetch_chart`, which keeps the symbol as given, with the same query2 → query1
+fallback and 429 retry. A test pins the URLs.
+
+**Upstox, reusing TradeSagar's login.** TradeSagar (`C:\ChartStudio\backend`, port 8000) already logs in to Upstox
+every day, so FinEngine doesn't log in separately.
+- **Where it applies:** only the live API on the Forex24hr server.
+  - It asks TradeSagar's `/api/upstox/status` whether Upstox is connected.
+  - If it is, it gets NSE 5-minute candles from `/api/upstox/history?symbol=NSE:<SYM>&interval=5min`.
+- **Merge rule:** Upstox candles replace Yahoo's for every day Upstox covers (today, live). Yahoo keeps the older
+  sessions, because the Time Machine needs at least 20 full ones.
+- **Fallback:** if TradeSagar isn't running (after a restart, until someone logs in by Remote Desktop), Upstox isn't
+  logged in, or the token is missing, the desk uses Yahoo. The Day Trader page shows **Data: Upstox (via TradeSagar) +
+  Yahoo history** or **Data: Yahoo Finance**; the tooltip gives the reason.
+- **The token never leaves the server.** The installer reads TradeSagar's `TRADING_API_TOKEN` from
+  `C:\ChartStudio\backend\.env.local` and writes `TRADESAGAR_TOKEN` and `TRADESAGAR_API` into
+  `C:\FinEngine\finengine.env`, restricted to Administrators and SYSTEM. Nothing is in the repo or the website.
+- **The GitHub snapshot stays on Yahoo:** GitHub Actions can't reach TradeSagar's backend on the server.
+- **Tests:** `test_market_desk.py` runs a fake TradeSagar backend and checks three cases:
+  - Upstox logged in: its candles win for today (prices +1.00 in the fake show up) and the history stays Yahoo's
+    (59 sessions).
+  - Logged out: Yahoo.
+  - Backend down: Yahoo, with the reason.
+- **Data licence:** Upstox and NSE terms generally cover personal use; check them before showing this data publicly.
+
 ## 7. Commits on the branch
 
 | Commit | What |
@@ -347,6 +375,9 @@ server".
 | `8396321` | Deploy the live API to the Forex24hr server (`C:\FinEngine`) |
 | `a5a8486` | PR #2: fix the empty desk outside 9:50 AM–3:30 PM ET |
 | (PR #3) | India (NSE) desk, live API `market=IN`, server-move guide |
+| PR #4 | UX redesign (one app shell, sortable screener, trade workspace, Apple HIG) |
+| PR #5 | India desk: keep `.NS` in Yahoo chart URLs |
+| PR #6 | Indian stocks from Upstox via TradeSagar, with Yahoo fallback |
 
 ---
 

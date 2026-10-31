@@ -14,13 +14,18 @@
 # https://app.forex24hr.com/finengine/ with the existing certificate.
 # It runs as the scheduled task "FinEngine live API" (SYSTEM, at boot), so unlike
 # TradeSagar it needs no Remote Desktop log-on after a restart.
+#
+# Indian stocks: if TradeSagar's backend is set up here (C:\ChartStudio\backend\.env.local
+# has TRADING_API_TOKEN), the desk takes NSE candles from its Upstox login; otherwise Yahoo.
 
 param(
     [string]$Zip = 'C:\FinEngine\finengine.zip',
     [string]$SecUserAgent = 'FinEngine forex24hr@zohomail.in',
     [int]$Port = 8100,
     [string]$NginxDir = 'C:\nginx-1.31.4',
-    [string]$PublicHost = 'app.forex24hr.com'
+    [string]$PublicHost = 'app.forex24hr.com',
+    [string]$TradeSagarEnv = 'C:\ChartStudio\backend\.env.local',
+    [string]$TradeSagarApi = 'http://127.0.0.1:8000'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -79,7 +84,26 @@ try {
 
     # -- 4. settings ----------------------------------------------------------
     # ASCII, no BOM: run-api.cmd reads KEY=VALUE lines from this file
-    [IO.File]::WriteAllText((Join-Path $Root 'finengine.env'), "SEC_USER_AGENT=$SecUserAgent`r`n", [Text.Encoding]::ASCII)
+    $envLines = @("SEC_USER_AGENT=$SecUserAgent")
+    # Indian stocks from Upstox: reuse TradeSagar's login through its backend (port 8000).
+    # Its token is read from TradeSagar's own settings, so it never leaves this server.
+    if (Test-Path $TradeSagarEnv) {
+        $line = Get-Content $TradeSagarEnv | Where-Object { $_ -match '^\s*TRADING_API_TOKEN\s*=' } | Select-Object -First 1
+        $tok = if ($line) { ($line -split '=', 2)[1].Trim().Trim('"').Trim("'") } else { '' }
+        if ($tok) {
+            $envLines += "TRADESAGAR_TOKEN=$tok"
+            $envLines += "TRADESAGAR_API=$TradeSagarApi"
+            Write-Host "Indian stocks: using TradeSagar's Upstox login ($TradeSagarApi)"
+        } else {
+            Write-Host "No TRADING_API_TOKEN in $TradeSagarEnv`: Indian stocks will use Yahoo" -ForegroundColor Yellow
+        }
+    } else {
+        Write-Host "$TradeSagarEnv not found: Indian stocks will use Yahoo" -ForegroundColor Yellow
+    }
+    $envFile = Join-Path $Root 'finengine.env'
+    [IO.File]::WriteAllText($envFile, (($envLines -join "`r`n") + "`r`n"), [Text.Encoding]::ASCII)
+    # The file holds TradeSagar's token: Administrators and SYSTEM only
+    & icacls $envFile /inheritance:r /grant:r 'Administrators:F' 'SYSTEM:F' | Out-Null
 
     # -- 5. the port ----------------------------------------------------------
     $busy = Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue
