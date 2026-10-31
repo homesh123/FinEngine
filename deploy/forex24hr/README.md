@@ -9,12 +9,47 @@
 | Process | `127.0.0.1:8100`, scheduled task **FinEngine live API** (SYSTEM, at boot, restarts if it stops) |
 | Public URL | `https://app.forex24hr.com/finengine/` via nginx (`conf\finengine-location.conf`, included in the app.forex24hr.com server blocks) |
 | nginx backups | `C:\FinEngine\backup\` |
+| Auto-update | scheduled task **FinEngine auto-update** (SYSTEM, every 5 minutes), `C:\FinEngine\auto-update.ps1`, log `C:\FinEngine\logs\auto-update.log` |
+| Installed version | `C:\FinEngine\deployed.json` (commit, backend fingerprint, time) |
 
-Deploy or update, from the Mac with the SSH key:
+First install (once), from the Mac with the SSH key:
 
 ```bash
-bash deploy/forex24hr/deploy-from-mac.sh            # or: ... main
+bash deploy/forex24hr/deploy-from-mac.sh            # main; or: ... other-branch
 ```
+
+## Auto-deploy: every backend commit on main
+
+After that first install, **you don't deploy by hand any more**. Merge to `main` and within about 5 minutes the server
+installs it by itself:
+
+1. Every 5 minutes the task **FinEngine auto-update** asks GitHub for the newest commit on `main`
+   (`api.github.com`, no key needed: the repository is public).
+2. New commit: it downloads it from `codeload.github.com` and fingerprints `scripts`, `server`, `vendor` and `deploy`.
+   If only the website changed (`src/`, `public/`, ...), the fingerprint is the same and nothing is restarted.
+3. Backend changed: it runs that commit's own `install-finengine.ps1` (new packages, new nginx location, restart,
+   health check).
+4. If the install fails, it reinstalls the previous version (`C:\FinEngine\finengine.prev.zip`) and skips that commit;
+   the next commit is tried as usual. Look in `logs\auto-update.log` and `logs\install.log`.
+
+Why the server pulls instead of GitHub pushing: SSH on this server is open only to the home network, so GitHub
+Actions can't reach it, and this way no server password or key is stored on GitHub.
+
+| What you want | Command (PowerShell on the server) |
+|---|---|
+| What's installed | `Get-Content C:\FinEngine\deployed.json` |
+| Last updates | `Get-Content C:\FinEngine\logs\auto-update.log -Tail 20` |
+| Update now | `Start-ScheduledTask 'FinEngine auto-update'` |
+| Reinstall now, even if unchanged | `powershell -ExecutionPolicy Bypass -File C:\FinEngine\auto-update.ps1 -Force` |
+| Pause auto-update (e.g. testing a branch) | `Disable-ScheduledTask 'FinEngine auto-update'` (back on: `Enable-ScheduledTask ...`) |
+
+Notes:
+- It follows `main` only. A branch deployed from the Mac for a test is replaced at the next backend commit on `main`
+  (pause the task while you test).
+- A change to `auto-update.ps1` itself is picked up by the next run. A change to the *task* (its schedule) only
+  applies after a deploy from the Mac.
+- If the repository is made private, the server can't see it any more without a token: auto-update then logs
+  "GitHub not reachable" and the running version keeps working.
 
 On the server (PowerShell):
 
@@ -50,7 +85,8 @@ working while you move. Only the live data (the **Live** button) needs the API.
 
 **What the new server needs**
 - Outbound internet to `query1/query2.finance.yahoo.com`, `www.sec.gov`, `data.sec.gov`,
-  `disclosures-clerk.house.gov`, `www.nasdaqtrader.com`, `pypi.org` (install only).
+  `disclosures-clerk.house.gov`, `www.nasdaqtrader.com`, `pypi.org` (install only), `api.github.com` and
+  `codeload.github.com` (auto-update).
 - Python 3.9 or newer. On Windows the installer puts Python 3.12 in `C:\Python312` if there is none.
 - A web server with HTTPS for a hostname you control (the site is HTTPS, so browsers refuse a plain-HTTP API).
 - Inbound 80/443 open; SSH (22) open to your home IP range for deploys.
@@ -67,7 +103,9 @@ working while you move. Only the live data (the **Live** button) needs the API.
    FOREX24HR_HOST=administrator@NEW.IP.ADDRESS bash deploy/forex24hr/deploy-from-mac.sh
    ```
    (`FOREX24HR_KEY=~/.ssh/other_key` if the key changes.) The installer creates `C:\FinEngine`,
-   the venv, the startup task, and the nginx `/finengine/` location, and checks `/api/health`.
+   the venv, the startup task, the auto-update task and the nginx `/finengine/` location, and checks `/api/health`.
+   From then on the new server installs backend commits on `main` by itself (it needs outbound access to
+   `api.github.com` and `codeload.github.com`).
 4. Keep `SEC_USER_AGENT` (in `C:\FinEngine\finengine.env`): SEC asks for a name and email.
 5. **DNS:** if the hostname stays `app.forex24hr.com`, point its A record (GoDaddy) at the new IP. If you use a
    new hostname, users paste the new URL under the **Snapshot** button, or bake it into the site with
@@ -76,6 +114,7 @@ working while you move. Only the live data (the **Live** button) needs the API.
 7. **Old server:** stop and remove the service, and take the location out of nginx:
    ```powershell
    Unregister-ScheduledTask 'FinEngine live API' -Confirm:$false
+   Unregister-ScheduledTask 'FinEngine auto-update' -Confirm:$false   # or it keeps installing there
    # delete the "include finengine-location.conf;" lines in C:\nginx-*\conf\*.conf, then:
    C:\forex24hr\reload-nginx.cmd
    ```
@@ -102,4 +141,6 @@ UNIT
 sudo systemctl enable --now finengine-api        # starts now and at every boot
 ```
 Then put the contents of `finengine-location.conf` inside your HTTPS `server { }` block, `sudo nginx -t && sudo systemctl reload nginx`,
-and get a certificate with `certbot --nginx`. Update with `cd /opt/finengine && sudo git pull && sudo systemctl restart finengine-api`.
+and get a certificate with `certbot --nginx`. Update with `cd /opt/finengine && sudo git pull && sudo systemctl restart finengine-api`;
+to auto-deploy like on Windows, run that every 5 minutes from cron
+(`*/5 * * * * cd /opt/finengine && git fetch -q && [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ] && git merge -q --ff-only origin/main && venv/bin/pip install -q -r scripts/requirements.txt && systemctl restart finengine-api`).
