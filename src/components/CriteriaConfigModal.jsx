@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 import { X, Save } from 'lucide-react';
+import { hasLiveApi, liveJson } from '../utils/dataSource';
+import { saveCriteria } from '../utils/screenerRules';
 
 export default function CriteriaConfigModal({ currentCriteria, onClose, onSave }) {
     const defaultFallback = {
@@ -27,14 +29,17 @@ export default function CriteriaConfigModal({ currentCriteria, onClose, onSave }
         e.preventDefault();
         setSaving(true);
         try {
-            const res = await fetch('http://127.0.0.1:8000/api/investment/criteria', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(formData)
-            });
-            if (!res.ok) throw new Error('Failed to update criteria');
-            const data = await res.json();
-            onSave(data.criteria);
+            if (hasLiveApi()) {
+                const data = await liveJson('/api/investment/criteria', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(formData)
+                });
+                onSave(data.criteria);
+            } else {
+                saveCriteria(formData);   // static site: criteria apply in this browser
+                onSave(formData);
+            }
         } catch (err) {
             alert(err.message);
         } finally {
