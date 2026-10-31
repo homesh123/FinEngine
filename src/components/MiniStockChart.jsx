@@ -139,17 +139,17 @@ export default function MiniStockChart({ symbol, market, plan, onClose, height =
                         {new Date(hk.time).toLocaleDateString([], { day: 'numeric', month: 'short', year: '2-digit' })} · O {fmtPx(hk.open)} H {fmtPx(hk.high)} L {fmtPx(hk.low)} C <b>{fmtPx(hk.close)}</b>
                     </span>
                 )}
-                <span className="text-[10px] text-slate-500 dark:text-slate-400"><span className="text-indigo-500">━</span> 50-day <span className="text-amber-500">━</span> 200-day avg</span>
+                <span className="text-[11px] text-slate-500 dark:text-slate-400"><span className="text-indigo-500">━</span> 50-day <span className="text-amber-500">━</span> 200-day avg</span>
                 <div className="ml-auto flex items-center gap-1">
                     <div className="inline-flex rounded-md bg-slate-100 dark:bg-slate-800 p-0.5">
                         {RANGES.map(([l, n]) => (
                             <button key={l} type="button" onClick={() => setRange(n)} aria-pressed={range === n}
-                                className={`px-2 py-0.5 rounded text-[11px] font-semibold ${range === n ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-300 shadow-sm' : 'text-slate-500 dark:text-slate-400'}`}>{l}</button>
+                                className={`min-w-[44px] h-11 sm:h-auto sm:min-w-0 px-2 sm:py-0.5 rounded text-[11px] font-semibold ${range === n ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-300 shadow-sm' : 'text-slate-500 dark:text-slate-400'}`}>{l}</button>
                         ))}
                     </div>
-                    <button type="button" onClick={() => openStockChart(symbol, market)} title="Open the full chart on Yahoo Finance"
-                        className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold text-indigo-600 dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-500/10">
-                        <ExternalLink size={12} /> Full chart
+                    <button type="button" onClick={() => openStockChart(symbol, market)} title="Open on TradingView"
+                        className="inline-flex items-center gap-1 h-11 sm:h-auto px-2 sm:py-1 rounded-md text-[11px] font-semibold text-indigo-600 dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-500/10">
+                        <ExternalLink size={12} /> TradingView
                     </button>
                     {onClose && <button type="button" onClick={onClose} aria-label="Close chart" className="w-7 h-7 flex items-center justify-center rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 dark:hover:text-slate-200"><X size={15} /></button>}
                 </div>

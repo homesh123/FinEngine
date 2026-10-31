@@ -55,7 +55,7 @@ export default function InfoTip({ title, children, label }) {
                 // Hover/focus already open it, so a click/tap only opens (never
                 // toggles closed); it closes on leave, outside tap, scroll or Escape.
                 onClick={(e) => { e.stopPropagation(); show(); }}
-                className="ml-1 p-0.5 rounded-full text-slate-400 hover:text-indigo-500 dark:hover:text-indigo-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+                className="relative z-10 ml-1 p-0.5 rounded-full text-slate-400 before:absolute before:-inset-3.5 before:content-[''] hover:text-indigo-500 dark:hover:text-indigo-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
             >
                 <Info size={12} strokeWidth={2.25} />
             </button>

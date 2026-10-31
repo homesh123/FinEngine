@@ -57,19 +57,19 @@ function TradePlan({ plan, currency }) {
     return (
         <div className="mt-3 grid grid-cols-2 lg:grid-cols-4 gap-2">
             <div className={`${cell} bg-slate-50 dark:bg-slate-800/60`}>
-                <span className="text-[10px] uppercase tracking-wide text-slate-500 dark:text-slate-400">Buy around</span>
+                <span className="text-[11px] uppercase tracking-wide text-slate-500 dark:text-slate-400">Buy around</span>
                 <span className="font-mono font-bold text-slate-800 dark:text-slate-100">{formatMoney(plan.entry, currency, 2)}</span>
             </div>
             <div className={`${cell} bg-green-50 dark:bg-green-500/10`}>
-                <span className="text-[10px] uppercase tracking-wide text-green-700 dark:text-green-400">Target</span>
+                <span className="text-[11px] uppercase tracking-wide text-green-700 dark:text-green-400">Target</span>
                 <span className="font-mono font-bold text-green-700 dark:text-green-400">{formatMoney(plan.target, currency, 2)} <span className="text-xs">({pct(plan.target_pct)})</span></span>
             </div>
             <div className={`${cell} bg-red-50 dark:bg-red-500/10`}>
-                <span className="text-[10px] uppercase tracking-wide text-red-700 dark:text-red-400">Stop-loss (exit if below)</span>
+                <span className="text-[11px] uppercase tracking-wide text-red-700 dark:text-red-400">Stop-loss (exit if below)</span>
                 <span className="font-mono font-bold text-red-700 dark:text-red-400">{formatMoney(plan.stop_loss, currency, 2)} <span className="text-xs">({pct(plan.stop_pct)})</span></span>
             </div>
             <div className={`${cell} bg-indigo-50 dark:bg-indigo-500/10`}>
-                <span className="text-[10px] uppercase tracking-wide text-indigo-700 dark:text-indigo-300">Hold for</span>
+                <span className="text-[11px] uppercase tracking-wide text-indigo-700 dark:text-indigo-300">Hold for</span>
                 <span className="font-bold text-indigo-800 dark:text-indigo-200">{plan.hold_weeks[0]}–{plan.hold_weeks[1]} weeks</span>
             </div>
         </div>
