@@ -15,6 +15,10 @@
 # It runs as the scheduled task "FinEngine live API" (SYSTEM, at boot), so unlike
 # TradeSagar it needs no Remote Desktop log-on after a restart.
 #
+# Auto-update: it also registers the task "FinEngine auto-update" (SYSTEM, every 5 minutes),
+# which runs C:\FinEngine\auto-update.ps1: when a commit on main changes the backend
+# (scripts, server, vendor, deploy), the server downloads it and runs this installer again.
+#
 # Indian stocks: if TradeSagar's backend is set up here (C:\ChartStudio\backend\.env.local
 # has TRADING_API_TOKEN), the desk takes NSE candles from its Upstox login; otherwise Yahoo.
 
@@ -25,7 +29,9 @@ param(
     [string]$NginxDir = 'C:\nginx-1.31.4',
     [string]$PublicHost = 'app.forex24hr.com',
     [string]$TradeSagarEnv = 'C:\ChartStudio\backend\.env.local',
-    [string]$TradeSagarApi = 'http://127.0.0.1:8000'
+    [string]$TradeSagarApi = 'http://127.0.0.1:8000',
+    [string]$Sha = '',                 # the commit being installed (recorded in deployed.json)
+    [switch]$FromAutoUpdate            # run by auto-update.ps1: leave its own task alone
 )
 
 $ErrorActionPreference = 'Stop'
@@ -35,6 +41,7 @@ $Venv = Join-Path $Root 'venv'
 $Logs = Join-Path $Root 'logs'
 $Backup = Join-Path $Root 'backup'
 $TaskName = 'FinEngine live API'
+$UpdateTask = 'FinEngine auto-update'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 foreach ($d in $Root, $Logs, $Backup) { New-Item -ItemType Directory -Force -Path $d | Out-Null }
@@ -52,7 +59,13 @@ try {
         ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
     if (Test-Path $App) { Remove-Item -Recurse -Force $App }
     Expand-Archive -Path $Zip -DestinationPath $App -Force
-    Copy-Item (Join-Path $App 'deploy\forex24hr\run-api.cmd') (Join-Path $Root 'run-api.cmd') -Force
+    $deployDir = Join-Path $App 'deploy\forex24hr'
+    foreach ($f in 'run-api.cmd', 'auto-update.ps1', 'backend-hash.ps1') {
+        Copy-Item (Join-Path $deployDir $f) (Join-Path $Root $f) -Force
+    }
+    # Fingerprint now, before Python adds caches: auto-update.ps1 compares new commits with it
+    . (Join-Path $deployDir 'backend-hash.ps1')
+    $backendHash = Get-BackendHash $App
 
     # -- 2. Python 3.9+ ------------------------------------------------------
     Step 'Python'
@@ -176,8 +189,30 @@ try {
     } catch {
         Write-Host "Could not reach it from the server itself ($($_.Exception.Message)); check from a browser." -ForegroundColor Yellow
     }
+    # -- 9. auto-update from GitHub (main) ------------------------------------------
+    if (-not $FromAutoUpdate) {
+        Step "Scheduled task '$UpdateTask' (every 5 minutes)"
+        $old = Get-ScheduledTask -TaskName $UpdateTask -ErrorAction SilentlyContinue
+        if ($old) { Unregister-ScheduledTask -TaskName $UpdateTask -Confirm:$false }
+        $uAction = New-ScheduledTaskAction -Execute 'powershell.exe' `
+            -Argument "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$Root\auto-update.ps1`""
+        $uTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(2) `
+            -RepetitionInterval (New-TimeSpan -Minutes 5) -RepetitionDuration (New-TimeSpan -Days 9999)
+        $uSettings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Minutes 30) -StartWhenAvailable `
+            -MultipleInstances IgnoreNew -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+        Register-ScheduledTask -TaskName $UpdateTask -Action $uAction -Trigger $uTrigger -Settings $uSettings -Principal $principal | Out-Null
+        Write-Host 'New backend commits on main are installed within about 5 minutes (log: logs\auto-update.log).'
+    }
+
+    # What is installed: auto-update.ps1 skips commits that don't change it
+    $installer = Join-Path $Root 'install-finengine.ps1'
+    if ($PSCommandPath -ne $installer) { Copy-Item $PSCommandPath $installer -Force }
+    $stateObj = [ordered]@{ sha = $Sha; hash = $backendHash; installed = (Get-Date -Format s) }
+    $stateObj | ConvertTo-Json | Set-Content -Path (Join-Path $Root 'deployed.json') -Encoding ASCII
+
     Write-Host "`nDone. Live API URL for the site: https://$PublicHost/finengine" -ForegroundColor Green
 }
 finally {
     Stop-Transcript | Out-Null
 }
+exit 0

@@ -172,6 +172,8 @@ Files in `deploy/forex24hr/` (details in its README):
 | `install-finengine.ps1` | Unpacks to `C:\FinEngine\app`, installs Python 3.12 if no 3.9+ is present, creates `C:\FinEngine\venv`, writes `finengine.env`, registers the scheduled task **FinEngine live API** (SYSTEM, at boot, restarts on failure), waits for `/api/health`, adds `include finengine-location.conf;` to the `app.forex24hr.com` server blocks (backup first; `nginx -t`; restores the backup if the test fails), reloads nginx |
 | `run-api.cmd` | Starts `live_api.py --warm` on `127.0.0.1:8100`, logging to `C:\FinEngine\logs\api.log` |
 | `finengine-location.conf` | `location /finengine/` → `127.0.0.1:8100`, 300 s timeouts |
+| `auto-update.ps1` | Run every 5 minutes by the task **FinEngine auto-update**: installs each backend commit on `main` (see 6d) |
+| `backend-hash.ps1` | Fingerprint of `scripts server vendor deploy`, so website-only commits don't restart the API |
 
 Isolation from the existing services:
 - TradeSagar (`C:\ChartStudio`, port 8000) and its Python are not touched.
@@ -368,6 +370,29 @@ every day, so FinEngine doesn't log in separately.
   - Backend down: Yahoo, with the reason.
 - **Data licence:** Upstox and NSE terms generally cover personal use; check them before showing this data publicly.
 
+## 6d. Auto-deploy of backend commits to the server (31 Oct)
+
+Ask: when backend changes are committed, the server should deploy them by itself.
+
+- **Pull, not push.** SSH on the server is open only to the home network, so GitHub Actions can't log in to it, and
+  storing a server key on GitHub would be a risk. The server asks GitHub instead.
+- **The task:** `install-finengine.ps1` registers **FinEngine auto-update** (SYSTEM, every 5 minutes, one run at a
+  time, survives restarts). It runs `C:\FinEngine\auto-update.ps1`:
+  1. Newest commit on `main` from `api.github.com` (public repo, no token). Same as `deployed.json`: done.
+  2. Downloads the commit from `codeload.github.com` and fingerprints `scripts`, `server`, `vendor`, `deploy`
+     (SHA-256 of every file). Same fingerprint (a website-only commit): records the commit, no restart.
+  3. Otherwise runs that commit's own installer (`-FromAutoUpdate -Sha <commit>`), which stops the API, unpacks,
+     updates packages, restarts the task, checks `/api/health` and nginx.
+  4. If the install fails, it reinstalls `finengine.prev.zip` with the previous installer and marks the commit
+     `failed_sha` so it isn't retried every 5 minutes. The next commit is tried normally.
+- **Files on the server:** `deployed.json` (commit, fingerprint, time), `logs\auto-update.log`, `logs\install.log`.
+- **One-time step:** the server still runs the version from before this change, which has no auto-update task. Run
+  `bash deploy/forex24hr/deploy-from-mac.sh` once from the Mac (it now defaults to `main` and passes the commit);
+  after that, merging to `main` is the whole deployment.
+- **Not tested on Windows from here:** there is no PowerShell in the build sandbox. The scripts use only Windows
+  PowerShell 5.1 commands (Server 2016), are ASCII, and avoid `>>` (UTF-16 in 5.1). The first run after the Mac
+  deploy shows in `logs\auto-update.log`.
+
 ## 7. Commits on the branch
 
 | Commit | What |
@@ -384,6 +409,8 @@ every day, so FinEngine doesn't log in separately.
 | PR #5 | India desk: keep `.NS` in Yahoo chart URLs |
 | PR #6 | Indian stocks from Upstox via TradeSagar, with Yahoo fallback |
 | PR #7 | India desk: newest bar across several stocks (max over dicts) |
+| PR #8 | Live-data timeout and a hint when the page never starts |
+| PR #9 | Server auto-deploys backend commits on `main` |
 
 ---
 
@@ -408,9 +435,10 @@ python server/live_api.py --port 8000 --warm
 ```
 Then click **Snapshot** in the site header and paste the server's HTTPS URL.
 
-**Deploy or update the server** (from the Mac, on the home network)
+**Deploy or update the server:** merge to `main`; the server installs backend changes within about 5 minutes.
+Only the first time (or on a new server), from the Mac on the home network:
 ```bash
-bash deploy/forex24hr/deploy-from-mac.sh            # or: ... main
+bash deploy/forex24hr/deploy-from-mac.sh            # main; or: ... other-branch
 ```
 Then paste `https://app.forex24hr.com/finengine` under **Snapshot**.
 
@@ -437,7 +465,8 @@ upstream version, update the commit in `vendor/README.md`, and run both test sui
    PR #1: while Pages deploys from the branch, the merge would serve the source
    `index.html` and the site would be blank.
 2. **Merge PR #1**, then check the first workflow run (tests, data step, deploy).
-3. **Deploy the live API** with `deploy/forex24hr/deploy-from-mac.sh` (live data for US and India). Or connect
+3. **Deploy the live API once more** with `deploy/forex24hr/deploy-from-mac.sh` (live data for US and India); this
+   also turns on auto-update, so later backend commits on `main` install themselves. Or connect
    a Mac folder to a Claude session via Remote Control and have it run the deploy:
    the Desktop folder was not offered to cloud sessions, so updating the Claude
    app or adding another folder may be needed.
