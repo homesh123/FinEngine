@@ -612,7 +612,10 @@ export default function DayTrader() {
     const [theme, setTheme] = useState(savedTheme);
     const dark = theme === 'dark';
     const liveBase = useLiveApiBase();
-    const [market, setMarket] = useState(() => { try { return localStorage.getItem(MARKET_KEY) === 'IN' ? 'IN' : 'US'; } catch { return 'US'; } });
+    // India by default: the desk's own choice, else the screener's market, else India
+    const [market, setMarket] = useState(() => {
+        try { return (localStorage.getItem(MARKET_KEY) || localStorage.getItem('screenerMarket')) === 'US' ? 'US' : 'IN'; } catch { return 'IN'; }
+    });
     setMarketDisplay(market);
     const sess = SESSIONS[market];
     const mq = market === 'IN' ? '&market=IN' : '';
