@@ -386,6 +386,43 @@ def daily_setups(closes):
 # ── the India desk ────────────────────────────────────────────────────────────
 
 import os  # noqa: E402
+import time  # noqa: E402
+import urllib.error  # noqa: E402
+import urllib.parse  # noqa: E402
+import urllib.request  # noqa: E402
+
+YAHOO_HOSTS = ('query2', 'query1')
+UA = 'Mozilla/5.0 (compatible; FinEngine; +https://github.com/homesh123/FinEngine)'
+
+
+def chart_url(yahoo_symbol, host='query2'):
+    """Like the skill's chart_url, but the symbol is used as given: the skill turns '.'
+    into '-' for US class shares (BRK.B → BRK-B), which would break 'RELIANCE.NS'."""
+    return 'https://%s.finance.yahoo.com/v8/finance/chart/%s?range=60d&interval=5m' % (
+        host, urllib.parse.quote(yahoo_symbol.upper(), safe=''))
+
+
+def fetch_chart(yahoo_symbol, pause=1.0):
+    """60 days of 5-minute bars, as the skill fetches them: query2 first, one retry
+    after a 429, then query1 on 429 or 5xx."""
+    last = None
+    for n, host in enumerate(YAHOO_HOSTS):
+        if n:
+            time.sleep(pause)
+        for attempt in (0, 1):
+            req = urllib.request.Request(chart_url(yahoo_symbol, host), headers={'User-Agent': UA, 'Accept': 'application/json'})
+            try:
+                with urllib.request.urlopen(req, timeout=20) as r:
+                    return r.read().decode('utf-8', 'replace')
+            except urllib.error.HTTPError as e:
+                last = e.code
+                if e.code == 429 and attempt == 0:
+                    time.sleep(pause * 3)
+                    continue
+                if e.code == 429 or e.code >= 500:
+                    break
+                raise ValueError('Yahoo answered HTTP %d for %s' % (e.code, yahoo_symbol))
+    raise ValueError('Yahoo answered HTTP %s for %s on both hosts' % (last, yahoo_symbol))
 
 # Liquid NIFTY 50 names (NSE symbols; Yahoo adds .NS). DT_WATCHLIST_IN overrides.
 IN_WATCHLIST = [x.strip().upper() for x in os.environ.get('DT_WATCHLIST_IN', ','.join([
@@ -430,7 +467,7 @@ def build_india_desk(symbols=None, charts=None, now=None, news=True, log=print, 
     texts, errors = {}, []
     for sym in symbols:
         try:
-            texts[sym] = charts[sym] if charts is not None else skill_desk.fetch_chart(f'{sym}.NS')
+            texts[sym] = charts[sym] if charts is not None else fetch_chart(f'{sym}.NS')
         except Exception as e:
             errors.append(f'chart {sym}: {e}')
     if not texts:
