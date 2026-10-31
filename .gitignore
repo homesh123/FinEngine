@@ -3,3 +3,6 @@ dist/
 .DS_Store
 *.log
 .env
+public/data/
+.data-cache/
+__pycache__/

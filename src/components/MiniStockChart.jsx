@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { ExternalLink, X } from 'lucide-react';
-import { fetchTwelveData } from '../utils/api';
+import { fetchDailyCandles } from '../utils/dataSource';
 import { chartSymbolFor, openStockChart } from '../utils/openChart';
 
 // A stock's daily chart inside the Investment tab: candles, 50- and 200-day
@@ -33,7 +33,7 @@ export default function MiniStockChart({ symbol, market, plan, onClose, height =
     useEffect(() => {
         let alive = true;
         setCandles(null); setError(null);
-        fetchTwelveData(chartSymbolFor(symbol, market), '1day', 500)
+        fetchDailyCandles(chartSymbolFor(symbol, market))
             .then(rows => { if (alive) setCandles(rows.filter(r => r.close > 0)); })
             .catch(e => { if (alive) setError(e.message || 'Could not load the chart'); });
         return () => { alive = false; };
@@ -147,7 +147,7 @@ export default function MiniStockChart({ symbol, market, plan, onClose, height =
                                 className={`px-2 py-0.5 rounded text-[11px] font-semibold ${range === n ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-300 shadow-sm' : 'text-slate-500 dark:text-slate-400'}`}>{l}</button>
                         ))}
                     </div>
-                    <button type="button" onClick={() => openStockChart(symbol, market)} title="Open in the full chart (indicators, drawings)"
+                    <button type="button" onClick={() => openStockChart(symbol, market)} title="Open the full chart on Yahoo Finance"
                         className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold text-indigo-600 dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-500/10">
                         <ExternalLink size={12} /> Full chart
                     </button>

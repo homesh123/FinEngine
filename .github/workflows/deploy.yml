@@ -1,9 +1,15 @@
 name: Deploy to GitHub Pages
 
+# Builds the site and the data snapshots it reads (scripts/build_data.py).
+# Yahoo Finance / SEC / House Clerk can't be called from the browser (no CORS),
+# so this job fetches them server-side and publishes JSON under ./data/.
 on:
   push:
     branches: ['main']
   workflow_dispatch:
+  schedule:
+    - cron: '*/15 13-21 * * 1-5'   # US market hours (UTC): refresh the Day Trader desk
+    - cron: '20 1 * * *'           # daily: screener fundamentals (US + India) after both markets close
 
 permissions:
   contents: read
@@ -12,7 +18,7 @@ permissions:
 
 concurrency:
   group: 'pages'
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   deploy:
@@ -32,6 +38,36 @@ jobs:
         run: npm ci
       - name: Build
         run: npm run build
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: scripts/requirements.txt
+      - name: Install data job dependencies
+        run: pip install -r scripts/requirements.txt
+      - name: Test data job
+        run: python -m unittest discover -s scripts
+      # Fundamentals are rebuilt once a day; the previous run's data is reused in between
+      - name: Restore data cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .data-cache
+          key: data-${{ github.run_id }}
+          restore-keys: data-
+      - name: Build data snapshots
+        continue-on-error: true      # a data-source outage must not block deploying the site
+        env:
+          SEC_USER_AGENT: FinEngine data job (github.com/${{ github.repository }}) ${{ github.repository_owner }}@users.noreply.github.com
+        run: python scripts/build_data.py --out dist/data --cache .data-cache
+      - name: Save data cache
+        if: always() && hashFiles('.data-cache/**') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: .data-cache
+          key: data-${{ github.run_id }}
+
       - name: Setup Pages
         uses: actions/configure-pages@v4
       - name: Upload artifact

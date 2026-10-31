@@ -6,6 +6,8 @@ import CriteriaConfigModal from './CriteriaConfigModal';
 import InfoTip from './InfoTip';
 import TopPicksPage from './TopPicksPage';
 import { formatMoney } from '../utils/money';
+import { ageText, getData, hasLiveApi, liveJson } from '../utils/dataSource';
+import { applyCriteria, DEFAULT_CRITERIA, savedCriteria } from '../utils/screenerRules';
 
 // Plain-language explanations shown behind the (i) icons. They describe exactly
 // how each number is calculated in this screener.
@@ -171,7 +173,8 @@ export default function InvestmentScreener() {
         window.addEventListener('popstate', onPop);
         return () => window.removeEventListener('popstate', onPop);
     }, []);
-    const [criteria, setCriteria] = useState({});
+    const [criteria, setCriteria] = useState(() => savedCriteria() || DEFAULT_CRITERIA);
+    const [snapshotAt, setSnapshotAt] = useState(null);   // when the published snapshot was built
     const [searchQuery, setSearchQuery] = useState("");
     const [agentOnly, setAgentOnly] = useState(false);
     const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -179,21 +182,21 @@ export default function InvestmentScreener() {
     const [showSuggestions, setShowSuggestions] = useState(false);
     const [isSearching, setIsSearching] = useState(false);
 
-    const fetchScreenerData = async () => {
+    const fetchScreenerData = async (crit = criteria) => {
         setLoading(true);
         setError(null);
         try {
-            const res = await fetch(`/api/investment/screener?market=${market}`, { cache: 'no-store' });
-            if (!res.ok) throw new Error('Failed to fetch screener data');
-            const data = await res.json();
-            setStocks(data.data || []);
-            
-            const critRes = await fetch('/api/investment/criteria');
-            if (critRes.ok) {
-                const critData = await critRes.json();
-                setCriteria(critData);
+            const { source, body } = await getData(`/api/investment/screener?market=${market}`, `screener-${market}.json`);
+            const rows = body.data || [];
+            // The snapshot has raw metrics only; statuses come from the criteria saved in this browser
+            setStocks(source === 'live' ? rows : rows.map(s => applyCriteria(s, crit)));
+            setSnapshotAt(source === 'live' ? null : body.generated_at);
+            if (source === 'live') {
+                const critData = await liveJson('/api/investment/criteria').catch(() => null);
+                if (critData) setCriteria(critData);
             }
         } catch (err) {
+            setStocks([]);
             setError(err.message);
         } finally {
             setLoading(false);
@@ -205,9 +208,10 @@ export default function InvestmentScreener() {
         setIsAnalyzing(true);
         setError(null);
         try {
-            const res = await fetch(`/api/investment/analyze/${encodeURIComponent(symbol.toUpperCase())}?market=${market}`);
-            const data = await res.json();
-            if (!res.ok) throw new Error(data.detail || 'Failed to analyze stock');
+            if (!hasLiveApi()) {
+                throw new Error(`${symbol.toUpperCase()} isn't in the published snapshot. Analysing any symbol on demand needs a live backend (set VITE_API_BASE) — add it to the universe in scripts/screener.py to include it in the snapshot.`);
+            }
+            const data = await liveJson(`/api/investment/analyze/${encodeURIComponent(symbol.toUpperCase())}?market=${market}`);
             
             // Check if already in list and update, otherwise add
             setStocks(prev => {
@@ -242,12 +246,15 @@ export default function InvestmentScreener() {
         const timer = setTimeout(async () => {
             setIsSearching(true);
             try {
-                const res = await fetch(`/api/investment/search?q=${encodeURIComponent(searchQuery)}&market=${market}`);
-                if (res.ok) {
-                    const data = await res.json();
+                if (hasLiveApi()) {
+                    const data = await liveJson(`/api/investment/search?q=${encodeURIComponent(searchQuery)}&market=${market}`);
                     setSuggestions(data.data || []);
-                    setShowSuggestions(true);
+                } else {
+                    const q = searchQuery.toLowerCase();   // static site: search the snapshot's stocks
+                    setSuggestions(stocks.filter(s => s.symbol.toLowerCase().includes(q) || s.name.toLowerCase().includes(q))
+                        .slice(0, 8).map(s => ({ symbol: s.symbol, name: s.name, exchange: market === 'IN' ? 'NSE' : '' })));
                 }
+                setShowSuggestions(true);
             } catch (err) {
                 console.error("Failed to fetch suggestions", err);
             } finally {
@@ -256,7 +263,7 @@ export default function InvestmentScreener() {
         }, 300);
 
         return () => clearTimeout(timer);
-    }, [searchQuery, market]);
+    }, [searchQuery, market, stocks]);
 
     const handleSuggestionClick = (symbol) => {
         setSearchQuery(symbol);
@@ -277,7 +284,7 @@ export default function InvestmentScreener() {
     const filteredStocks = stocks.filter((stock) =>
         (!agentOnly || stock.agent?.suggested) && (
         stock.symbol.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        stock.name.toLowerCase().includes(searchQuery.toLowerCase()))
+        (stock.name || '').toLowerCase().includes(searchQuery.toLowerCase()))
     );
     const agentCount = stocks.filter(s => s.agent?.suggested).length;
 
@@ -295,6 +302,11 @@ export default function InvestmentScreener() {
                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-4 md:mb-6">
                     <div className="flex flex-col gap-2">
                         <h1 className="text-xl md:text-2xl font-bold text-slate-800 dark:text-slate-100">Stock Investment Screener</h1>
+                        {snapshotAt && (
+                            <p className="text-[11px] text-slate-500 dark:text-slate-400" title={new Date(snapshotAt).toLocaleString()}>
+                                Data snapshot from {ageText(snapshotAt)} · refreshed daily by GitHub Actions from Yahoo Finance
+                            </p>
+                        )}
                         {/* Market toggle */}
                         <div role="radiogroup" aria-label="Market" className="inline-flex self-start p-0.5 rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
                             {[{ id: 'IN', label: '🇮🇳 India' }, { id: 'US', label: '🇺🇸 US' }].map(m => (
@@ -372,7 +384,7 @@ export default function InvestmentScreener() {
                             Top 5 to Invest
                         </button>
                         <button 
-                            onClick={fetchScreenerData}
+                            onClick={() => fetchScreenerData()}
                             className="flex-1 sm:flex-none flex justify-center items-center gap-2 px-3 py-2 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded hover:bg-slate-200 dark:hover:bg-slate-700 text-sm font-semibold transition-colors"
                         >
                             <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
@@ -594,7 +606,7 @@ export default function InvestmentScreener() {
                     onSave={(newCrit) => {
                         setCriteria(newCrit);
                         setShowConfig(false);
-                        fetchScreenerData(); // Re-fetch as backend will rescreen
+                        fetchScreenerData(newCrit); // re-screen with the new criteria
                     }} 
                 />
             )}
