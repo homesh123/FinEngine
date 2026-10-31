@@ -27,6 +27,22 @@ On the server (PowerShell):
 It needs no Remote Desktop log-on after a server restart (unlike TradeSagar and MT5).
 Then in the site, click **Snapshot** and paste `https://app.forex24hr.com/finengine`.
 
+## Indian stocks from Upstox (through TradeSagar)
+
+The India desk asks TradeSagar's backend on this server (`http://127.0.0.1:8000`) for NSE 5-minute candles from its
+Upstox login. Upstox candles replace Yahoo's for the days they cover (today); Yahoo keeps older sessions.
+
+- **Setup:** none. The installer copies TradeSagar's `TRADING_API_TOKEN` (from `C:\ChartStudio\backend\.env.local`)
+  into `C:\FinEngine\finengine.env` as `TRADESAGAR_TOKEN`, readable by Administrators and SYSTEM only.
+- **If TradeSagar's token changes:** run the deploy again, or edit `TRADESAGAR_TOKEN=` in `C:\FinEngine\finengine.env`
+  and restart the task (`Stop-ScheduledTask 'FinEngine live API'; Start-ScheduledTask 'FinEngine live API'`).
+- **Upstox login:** log in to Upstox in TradeSagar as usual each day. Until then, and whenever TradeSagar's backend
+  isn't running (after a restart, before the Remote Desktop log-on), the desk uses Yahoo.
+- **Which source is live:** the Day Trader page shows "Data: Upstox (via TradeSagar) + Yahoo history" or
+  "Data: Yahoo Finance"; hover it for the reason.
+- **Moving servers:** if TradeSagar stays on the old server, set `TRADESAGAR_API=` to its address (HTTPS if not local),
+  or leave the token out to use Yahoo only.
+
 ## Moving to a new server
 
 Nothing on GitHub depends on this server: the site and its 15-minute snapshot keep

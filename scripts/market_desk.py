@@ -464,10 +464,15 @@ def build_india_desk(symbols=None, charts=None, now=None, news=True, log=print, 
     import skill_desk
     s = NSE
     symbols = symbols or IN_WATCHLIST
-    texts, errors = {}, []
+    texts, errors, sources = {}, [], {}
+    upstox = upstox_status() if charts is None else {'connected': False, 'reason': 'charts given'}
+    _UPSTOX['ok'] = upstox['connected']
     for sym in symbols:
         try:
-            texts[sym] = charts[sym] if charts is not None else fetch_chart(f'{sym}.NS')
+            if charts is not None:
+                texts[sym], sources[sym] = charts[sym], 'given'
+            else:
+                texts[sym], sources[sym] = india_chart(sym, log=log)
         except Exception as e:
             errors.append(f'chart {sym}: {e}')
     if not texts:
@@ -495,7 +500,9 @@ def build_india_desk(symbols=None, charts=None, now=None, news=True, log=print, 
             'clock': {'open': open_now, 'reason': 'regular session' if open_now else 'outside NSE hours',
                       'date': when.date().isoformat(), 'opens': clock24(s.open_min), 'closes': clock24(s.close_min)},
             'plans': {}, 'errors': errors,
-            'engine': 'FinEngine port of the day-trader-skill rules (NSE session)'}
+            'engine': 'FinEngine port of the day-trader-skill rules (NSE session)',
+            'data_source': ('Upstox (via TradeSagar) + Yahoo history' if 'upstox' in sources.values() else 'Yahoo Finance'),
+            'upstox': {k: v for k, v in upstox.items() if k != 'expires_at'}}
 
     hits, daily = [], []
     for sym, bars in parsed.items():
@@ -560,3 +567,100 @@ def build_india_desk(symbols=None, charts=None, now=None, news=True, log=print, 
     for sym in set([h['symbol'] for h in hits] + list(parsed)[:6]):
         compact[sym] = skill_desk.compact_bars_tz(texts[sym], s.zone, s.open_min, s.close_min)
     return desk, compact
+
+
+# ── Upstox, through TradeSagar's backend on the same server ──────────────────
+# TradeSagar (C:\ChartStudio\backend) already holds the daily Upstox login. Its
+# /api/upstox/history gives NSE 5-minute candles; the desk prefers them for the
+# days they cover (today, live) and keeps Yahoo's bars for older sessions, which
+# the Time Machine needs. Not configured or not logged in → Yahoo only.
+
+TRADESAGAR_API = os.environ.get('TRADESAGAR_API', 'http://127.0.0.1:8000').rstrip('/')
+
+
+def _tradesagar_get(path, timeout=15):
+    token = os.environ.get('TRADESAGAR_TOKEN', '')
+    if not token:
+        raise ValueError('TRADESAGAR_TOKEN is not set')
+    req = urllib.request.Request(TRADESAGAR_API + path, headers={'X-Trade-Token': token, 'Accept': 'application/json'})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return json.loads(r.read().decode('utf-8', 'replace'))
+
+
+def upstox_status():
+    """{'connected': bool, 'user': ..., 'reason': ...} from TradeSagar's /api/upstox/status."""
+    if not os.environ.get('TRADESAGAR_TOKEN'):
+        return {'connected': False, 'reason': 'not configured (no TRADESAGAR_TOKEN)'}
+    try:
+        d = _tradesagar_get('/api/upstox/status')
+        return {'connected': bool(d.get('connected')), 'user': d.get('user_name'), 'expires_at': d.get('expires_at'),
+                'reason': None if d.get('connected') else 'Upstox is not logged in on TradeSagar'}
+    except Exception as e:      # TradeSagar not running (no Remote Desktop log-on), refused, ...
+        return {'connected': False, 'reason': f'TradeSagar backend unreachable: {e}'}
+
+
+def _epoch_seconds(t):
+    if isinstance(t, (int, float)):
+        return int(t / 1000) if t > 1e11 else int(t)
+    return int(datetime.fromisoformat(str(t).replace('Z', '+00:00')).timestamp())
+
+
+def upstox_candles(sym, limit=5000):
+    """NSE 5-minute candles from TradeSagar → [(epoch s, o, h, l, c, v)], oldest first."""
+    rows = _tradesagar_get('/api/upstox/history?symbol=%s&interval=5min&limit=%d'
+                           % (urllib.parse.quote('NSE:' + sym, safe=''), limit), timeout=30)
+    if isinstance(rows, dict):
+        rows = rows.get('data') or rows.get('candles') or []
+    out = []
+    for r in rows:
+        try:
+            out.append((_epoch_seconds(r['time']), float(r['open']), float(r['high']), float(r['low']),
+                        float(r['close']), int(r.get('volume') or 0)))
+        except (KeyError, TypeError, ValueError):
+            continue
+    return sorted(out)
+
+
+def merge_upstox(yahoo_text, candles, s, symbol):
+    """A Yahoo-shaped chart JSON: Upstox bars for every local date Upstox covers,
+    Yahoo's for the rest. yahoo_text may be None (Upstox only)."""
+    bars = {}
+    meta = {'symbol': symbol, 'dataGranularity': '5m'}
+    if yahoo_text:
+        res = json.loads(yahoo_text)['chart']['result'][0]
+        meta = dict(res.get('meta') or meta)
+        q = res['indicators']['quote'][0]
+        for i, t in enumerate(res.get('timestamp') or []):
+            if t is not None:
+                bars[int(t)] = tuple(q[k][i] for k in ('open', 'high', 'low', 'close', 'volume'))
+    day = lambda t: datetime.fromtimestamp(t, s.zone).date()
+    covered = {day(c[0]) for c in candles}
+    bars = {t: b for t, b in bars.items() if day(t) not in covered}
+    for t, o, h, l, c, v in candles:
+        bars[t] = (o, h, l, c, v)
+    ts = sorted(bars)
+    meta.pop('regularMarketTime', None)          # completeness is judged against the clock
+    return json.dumps({'chart': {'result': [{'meta': meta, 'timestamp': ts, 'indicators': {'quote': [{
+        k: [bars[t][i] for t in ts] for i, k in enumerate(('open', 'high', 'low', 'close', 'volume'))}]}}]}})
+
+
+def india_chart(sym, log=print):
+    """→ (chart JSON text, source label). Upstox via TradeSagar when it's logged in, merged with Yahoo history."""
+    yahoo, yerr = None, None
+    try:
+        yahoo = fetch_chart(f'{sym}.NS')
+    except Exception as e:
+        yerr = e
+    if _UPSTOX['ok']:
+        try:
+            candles = upstox_candles(sym)
+            if candles:
+                return merge_upstox(yahoo, candles, NSE, f'{sym}.NS'), 'upstox'
+        except Exception as e:
+            log(f'  upstox {sym}: {e}')
+    if yahoo is None:
+        raise yerr
+    return yahoo, 'yahoo'
+
+
+_UPSTOX = {'ok': False}

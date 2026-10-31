@@ -865,6 +865,12 @@ export default function DayTrader({ market = 'IN', onSource }) {
                 {desk?.generated_at && <span>{source === 'live' ? 'live' : 'snapshot'} · built {ageText(desk.generated_at)}</span>}
                 <button onClick={load} className="inline-flex items-center gap-1 min-h-[44px] sm:min-h-0 px-1 hover:text-slate-800 dark:hover:text-slate-200"><RefreshCw size={12} className={loading ? 'animate-spin' : ''} /> Refresh</button>
                 {market === 'IN' && <span title="The skill runs on NYSE hours; India uses FinEngine's port of its rules, checked against the skill">India: the skill's rules on NSE hours</span>}
+                {desk?.data_source && (
+                    <span title={desk.upstox?.connected ? 'NSE candles from your Upstox login (TradeSagar); older sessions from Yahoo' : `Upstox: ${desk.upstox?.reason || 'not connected'}`}
+                        className={desk.data_source.startsWith('Upstox') ? 'font-semibold text-emerald-700 dark:text-emerald-400' : ''}>
+                        Data: {desk.data_source}
+                    </span>
+                )}
             </div>
             {desk?.replay_note && <div className="text-xs font-semibold text-amber-700 dark:text-amber-400">{desk.replay_note}</div>}
 
