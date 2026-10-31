@@ -342,6 +342,11 @@ Yahoo client turns `.` into `-` for US class shares (BRK.B → BRK-B), so `RELIA
 now uses its own fetcher, `market_desk.fetch_chart`, which keeps the symbol as given, with the same query2 → query1
 fallback and 429 retry. A test pins the URLs.
 
+**Second India failure (PR #7).** After the `.NS` fix the next run failed with `'>' not supported between instances
+of 'dict' and 'dict'`. The desk picked the newest bar across stocks with `max()` over dicts. The tests used a single
+stock, where `max()` never compares, so they missed it. The fix compares by (date, time), and a two-stock test now
+reproduces the original error without the fix.
+
 **Upstox, reusing TradeSagar's login.** TradeSagar (`C:\ChartStudio\backend`, port 8000) already logs in to Upstox
 every day, so FinEngine doesn't log in separately.
 - **Where it applies:** only the live API on the Forex24hr server.
@@ -378,6 +383,7 @@ every day, so FinEngine doesn't log in separately.
 | PR #4 | UX redesign (one app shell, sortable screener, trade workspace, Apple HIG) |
 | PR #5 | India desk: keep `.NS` in Yahoo chart URLs |
 | PR #6 | Indian stocks from Upstox via TradeSagar, with Yahoo fallback |
+| PR #7 | India desk: newest bar across several stocks (max over dicts) |
 
 ---
 

@@ -118,6 +118,13 @@ class IndiaDeskTest(unittest.TestCase):
         self.assertEqual(desk['config']['no_entries_after'], '15:00')
         self.assertTrue(all(len(b) == 6 for b in bars['TSLA']))
 
+    def test_several_stocks(self):
+        # The first live run failed here: max() over the stocks' newest bars compared dicts
+        nse = as_nse(REEL_TEXT)
+        desk, _ = md.build_india_desk(symbols=['TSLA', 'COPY'], charts={'TSLA': nse, 'COPY': nse}, news=False,
+                                      now=datetime(2026, 10, 19, 10, 0, tzinfo=md.NSE.zone), log=lambda *_: None)
+        self.assertEqual(sorted(h['symbol'] for h in desk['scan']['hits']), ['COPY', 'TSLA'])
+
     def test_after_3pm_replays_the_session(self):
         desk, _ = self.build(datetime(2026, 10, 16, 18, 0, tzinfo=md.NSE.zone))
         self.assertEqual(desk['as_of'], '2026-10-16 15:00')
