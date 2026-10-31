@@ -485,7 +485,7 @@ def build_india_desk(symbols=None, charts=None, now=None, news=True, log=print, 
     parsed = {k: v for k, v in parsed.items() if v}
     if not parsed:
         raise ValueError('no complete NSE bars in the charts')
-    newest = max(b[-1] for b in parsed.values() if b)
+    newest = max((b[-1] for b in parsed.values() if b), key=lambda bar: (bar['date'], bar['start']))
     y, m, d = map(int, newest['date'].split('-'))
     hh, mm = map(int, newest['start'].split(':'))
     when = min(datetime(y, m, d, hh, mm, tzinfo=s.zone) + timedelta(minutes=5), real_now.astimezone(s.zone))
