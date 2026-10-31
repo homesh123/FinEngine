@@ -12,6 +12,7 @@ from http.server import ThreadingHTTPServer
 from unittest import mock
 
 import pandas as pd
+from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'server'))
@@ -96,6 +97,26 @@ class LiveApiTest(unittest.TestCase):
             self.assertEqual(r['sizing']['qty'], 8)
             with self.assertRaises(urllib.error.HTTPError) as e:
                 self.get('/api/desk/plan?symbol=TSLA&target=rm%20-rf')
+            self.assertEqual(e.exception.code, 400)
+
+    def test_india_desk_endpoints(self):
+        import market_desk
+        from test_market_desk import as_nse, REEL_TEXT
+        nse = as_nse(REEL_TEXT)
+        real = market_desk.build_india_desk
+        when = datetime(2026, 10, 19, 10, 0, tzinfo=market_desk.NSE.zone)
+        build = lambda log=None, keep_charts=None: real(symbols=['TSLA'], charts={'TSLA': nse}, now=when, news=False,
+                                                         log=lambda *_: None, keep_charts=keep_charts)
+        with mock.patch.object(market_desk, 'build_india_desk', build):
+            _, _, d = self.get('/api/desk?market=IN')
+            self.assertEqual((d['market'], d['currency'], d['live']), ('IN', 'INR', True))
+            self.assertEqual(d['plans']['TSLA']['plan']['stop'], 358.32)
+            _, _, b = self.get('/api/desk/bars?symbol=TSLA&market=IN')
+            self.assertGreater(len(b['bars']), 4000)
+            _, _, p = self.get('/api/desk/plan?symbol=TSLA&market=IN&target=1R&stop=or-mid')
+            self.assertEqual((p['plan']['target'], p['timemachine']['mc']['replays']), (370.04, 10000))
+            with self.assertRaises(urllib.error.HTTPError) as e:
+                self.get('/api/desk/plan?symbol=NOPE&market=IN&target=1R&stop=or-mid')
             self.assertEqual(e.exception.code, 400)
 
     def test_rejects_bad_symbols(self):

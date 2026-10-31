@@ -6,7 +6,7 @@ import {
 import LiveDataButton, { useLiveApiBase } from '../components/LiveDataButton';
 import { ageText, getData, liveJson, snapshotJson } from '../utils/dataSource';
 import {
-    DEFAULT_CONFIG, barOfTime, buildPool, loadOrders, markToMarket, riskCheck, roundCent, sameDay, saveOrders,
+    DEFAULT_CONFIG, SESSIONS, barOfTime, buildPool, setCurrencySymbol, loadOrders, markToMarket, riskCheck, roundCent, sameDay, saveOrders,
     simulate, sizeTrade, verdict as tmVerdict,
 } from '../utils/dayTrader';
 
@@ -31,16 +31,28 @@ const SKILLS = [
 ];
 
 const REFRESH_MS = 60000;
-const SETTINGS_KEY = 'dtSkillSettings';
+const SETTINGS_KEY = 'dtSkillSettings';   // + '-IN' for the India desk (rupees)
+const MARKET_KEY = 'dtMarket';
 const TARGETS = ['1R', '1.5R', '2R', '3R'];
 const STOPS = [['or-mid', 'Range midpoint'], ['or-low', 'Range low']];
 
-const money = (v, d = 2) => (v == null || Number.isNaN(+v) ? '—' : `$${(+v).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d })}`);
+// Display for the market being shown (set by the page before its panels render)
+let CUR = '$', TZ = 'ET', ZONE = 'America/New_York', BARS = 78, LOCALE = 'en-US';
+const setMarketDisplay = (m) => {
+    const s = SESSIONS[m];
+    [CUR, TZ, ZONE, BARS, LOCALE] = m === 'IN' ? ['₹', s.tzLabel, s.tz, s.bars, 'en-IN'] : ['$', s.tzLabel, s.tz, s.bars, 'en-US'];
+    setCurrencySymbol(CUR);
+};
+const money = (v, d = 2) => (v == null || Number.isNaN(+v) ? '—' : `${CUR}${(+v).toLocaleString(LOCALE, { minimumFractionDigits: d, maximumFractionDigits: d })}`);
 const pct = (v, d = 1) => (v == null ? '—' : `${v > 0 ? '+' : ''}${(+v).toFixed(d)}%`);
 const big = (v) => {
     if (v == null) return '—';
     const a = Math.abs(v);
     return a >= 1e9 ? `$${(v / 1e9).toFixed(2)}B` : a >= 1e6 ? `$${(v / 1e6).toFixed(1)}M` : `$${v.toLocaleString()}`;
+};
+const INDIA_DEFAULTS = {   // scripts/market_desk.py IN_CONFIG: trader-budget's defaults in rupees, NSE hours
+    budget: 100000, max_order_usd: 80000, min_order_usd: 100, max_loss_per_trade_usd: 1000, max_daily_loss_usd: 3000,
+    no_entries_before: '09:30', no_entries_after: '15:00', flat_by: '15:25',
 };
 const nyClock = (asOf) => (asOf || '').slice(11, 16);   // "2026-10-19 10:15" → "10:15"
 
@@ -48,8 +60,11 @@ function savedTheme() {
     try { return JSON.parse(localStorage.getItem('chartState') || '{}').theme === 'light' ? 'light' : 'dark'; } catch { return 'dark'; }
 }
 
-function loadSettings() {
-    try { return { ...DEFAULT_CONFIG, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}') }; } catch { return { ...DEFAULT_CONFIG }; }
+const settingsKey = (m) => (m === 'IN' ? `${SETTINGS_KEY}-IN` : SETTINGS_KEY);
+
+function loadSettings(m, defaults) {
+    const base = { ...DEFAULT_CONFIG, ...(defaults || {}) };
+    try { return { ...base, ...JSON.parse(localStorage.getItem(settingsKey(m)) || '{}') }; } catch { return base; }
 }
 
 function notify(title, body) {
@@ -88,11 +103,16 @@ const Empty = ({ children }) => (
     <div className="p-4 rounded-lg border border-dashed border-slate-300 dark:border-borderdark text-sm text-slate-500 dark:text-slate-400">{children}</div>
 );
 
-const ToolTag = ({ tool, engine }) => (
-    <span className="ml-2 align-middle text-[10px] font-mono font-normal text-slate-400" title={engine === 'browser' ? 'Browser port of the skill’s rule (no live API connected)' : 'Output of the skill’s own tool'}>
-        {tool}{engine === 'browser' ? ' · browser' : ''}
-    </span>
-);
+const ToolTag = ({ tool, engine }) => {
+    const nse = TZ === 'IST';    // the skill runs on NYSE hours: India uses FinEngine's port of its rules
+    const title = nse ? 'The skill’s rule on NSE hours (scripts/market_desk.py; checked to reproduce the skill on US data)'
+        : engine === 'browser' ? 'Browser port of the skill’s rule (no live API connected)' : 'Output of the skill’s own tool';
+    return (
+        <span className="ml-2 align-middle text-[10px] font-mono font-normal text-slate-400" title={title}>
+            {tool}{nse ? ' · NSE port' : ''}{engine === 'browser' ? ' · browser' : ''}
+        </span>
+    );
+};
 
 function NextButton({ to, onGo, children }) {
     return (
@@ -130,7 +150,7 @@ function Select({ label, value, onChange, options }) {
 function IntradayChart({ bars, date, plan, orHigh, orLow, height = 190 }) {
     const day = useMemo(() => {
         if (!bars?.length) return [];
-        const fmt = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' });
+        const fmt = new Intl.DateTimeFormat('en-CA', { timeZone: ZONE });
         return bars.filter(b => fmt.format(new Date(b[0] * 1000)) === date);
     }, [bars, date]);
     if (!day.length) return null;
@@ -138,7 +158,7 @@ function IntradayChart({ bars, date, plan, orHigh, orLow, height = 190 }) {
     const levels = [plan?.entry, plan?.stop, plan?.target, orHigh, orLow].filter(v => v > 0);
     const lo = Math.min(...day.map(b => b[3]), ...levels), hi = Math.max(...day.map(b => b[2]), ...levels);
     const y = v => H - 6 - ((v - lo) / (hi - lo || 1)) * (H - 12);
-    const x = i => (i / 77) * (W - padR);
+    const x = i => (i / (BARS - 1)) * (W - padR);
     const path = day.map((b, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(b[4]).toFixed(1)}`).join('');
     const line = (v, col, label, dash) => v > 0 && (
         <g key={label}>
@@ -172,7 +192,7 @@ function ScannerView({ desk, symbol, onPick, onGo }) {
                 <h2 className="font-bold text-slate-800 dark:text-white">Opening-range breakouts<ToolTag tool="scan.py orb" /></h2>
                 {desk.replay_note && <p className="mt-1 mb-2 text-xs font-semibold text-amber-700 dark:text-amber-400">{desk.replay_note}</p>}
                 <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
-                    {scan.scanned ?? 0} charts scanned as of {desk.as_of} ET · range = first {scan.or_minutes || 15} minutes · a hit is the first completed 5-minute bar to close above the range high.
+                    {scan.scanned ?? 0} charts scanned as of {desk.as_of} {TZ} · range = first {scan.or_minutes || 15} minutes · a hit is the first completed 5-minute bar to close above the range high.
                     {hits.length > 0 && ' Click one to work it.'}
                 </p>
                 {hits.length === 0 ? <Empty>No breakouts {desk.clock?.open ? 'so far today' : 'in the last session'}. {scan.note}</Empty> : (
@@ -241,7 +261,7 @@ function NewsView({ desk, symbol, onGo }) {
                             <div className="flex flex-wrap items-center gap-1.5 mb-0.5">
                                 <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${n.kind === 'headline' ? 'bg-slate-100 text-slate-600 dark:bg-surfacebg dark:text-slate-300' : 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400'}`}>{n.kind === 'headline' ? n.source : n.kind}</span>
                                 {(n.tags || []).map(t => <span key={t} className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-indigo-50 text-indigo-700 dark:bg-indigo-500/10 dark:text-indigo-300">{t}</span>)}
-                                <span className="text-[11px] text-slate-500">{new Date(n.time).toLocaleString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit', month: 'short', day: 'numeric' })} ET</span>
+                                <span className="text-[11px] text-slate-500">{n.time ? `${new Date(n.time).toLocaleString('en-US', { timeZone: ZONE, hour: 'numeric', minute: '2-digit', month: 'short', day: 'numeric' })} ${TZ}` : ''}</span>
                             </div>
                             <a href={n.link} target="_blank" rel="noopener noreferrer" className="font-semibold text-sm text-slate-800 dark:text-slate-100 hover:text-emerald-600 dark:hover:text-emerald-400">{n.title}</a>
                             {n.summary && <p className="text-xs text-slate-600 dark:text-slate-300 mt-0.5 line-clamp-2">{n.summary}</p>}
@@ -265,7 +285,7 @@ function EntryView({ desk, symbol, bars, watched, onToggleWatch, onGo }) {
             <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
                     <h2 className="font-bold text-slate-800 dark:text-white">Entry Timer · {symbol}<ToolTag tool="entry.py check" /></h2>
-                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Opening-range breakout, long only. Entries allowed {e.no_entries_before}–{e.no_entries_after} ET.</p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Opening-range breakout, long only. Entries allowed {e.no_entries_before}–{e.no_entries_after} {TZ}.</p>
                 </div>
                 <button onClick={() => onToggleWatch(symbol)}
                     className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold border ${watched ? 'bg-emerald-600 border-emerald-600 text-white' : 'border-slate-200 dark:border-borderdark text-slate-600 dark:text-slate-300'}`}>
@@ -301,7 +321,7 @@ function ExitView({ symbol, plan, rules, setRules, replanning, engine, onGo }) {
                 <Stat label="Stop" value={money(plan.stop)} tone="text-red-600 dark:text-red-400" />
                 <Stat label="Target" value={money(plan.target)} tone="text-green-600 dark:text-green-400" />
                 <Stat label="Risk / share" value={money(plan.risk_per_share)} />
-                <Stat label="Flat by" value={`${plan.flat_by || '15:55'} ET`} />
+                <Stat label="Flat by" value={`${plan.flat_by || '15:55'} ${TZ}`} />
             </div>
             {plan.stop_detail && <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">{plan.stop_detail}</p>}
             {(plan.warnings || []).map(w => <p key={w} className="mt-1 text-xs text-amber-700 dark:text-amber-400">{w}</p>)}
@@ -362,13 +382,13 @@ function BudgetView({ sizing, settings, setSettings, engine, error, onGo }) {
             <h2 className="font-bold text-slate-800 dark:text-white mb-1">Budget<ToolTag tool="size.py" engine={engine} /></h2>
             <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">Whole shares: the smallest of max loss, position cap, max order and cash. Your limits are saved in this browser.</p>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                <NumberField label="Budget" prefix="$" step="100" value={settings.budget} onChange={set('budget')} />
-                <NumberField label="Max loss per trade" prefix="$" step="5" value={settings.max_loss_per_trade_usd} onChange={set('max_loss_per_trade_usd')} />
-                <NumberField label="Max daily loss" prefix="$" step="10" value={settings.max_daily_loss_usd} onChange={set('max_daily_loss_usd')} />
+                <NumberField label="Budget" prefix={CUR} step="100" value={settings.budget} onChange={set('budget')} />
+                <NumberField label="Max loss per trade" prefix={CUR} step="5" value={settings.max_loss_per_trade_usd} onChange={set('max_loss_per_trade_usd')} />
+                <NumberField label="Max daily loss" prefix={CUR} step="10" value={settings.max_daily_loss_usd} onChange={set('max_daily_loss_usd')} />
                 <NumberField label="Trades per day" value={settings.max_trades_per_day} onChange={set('max_trades_per_day')} />
                 <NumberField label="Cash buffer %" value={settings.cash_buffer_pct} onChange={set('cash_buffer_pct')} />
                 <NumberField label="Max position %" value={settings.max_position_pct} onChange={set('max_position_pct')} />
-                <NumberField label="Max order" prefix="$" step="100" value={settings.max_order_usd} onChange={set('max_order_usd')} />
+                <NumberField label="Max order" prefix={CUR} step="100" value={settings.max_order_usd} onChange={set('max_order_usd')} />
                 <NumberField label="Min reward:risk" step="0.1" value={settings.min_reward_risk} onChange={set('min_reward_risk')} />
             </div>
             {error && <p className="mt-3 text-sm text-red-600 dark:text-red-400">{error}</p>}
@@ -423,7 +443,7 @@ function OrderView({ symbol, plan, sizing, risk, orders, onPlace, onClose }) {
                     <>
                         <div className="rounded-lg border border-slate-200 dark:border-borderdark p-3 text-sm text-slate-700 dark:text-slate-200">
                             <b>BUY {sizing.qty} {symbol}</b>, market, day · bracket: stop-loss {money(sizing.stop)}, take-profit {money(sizing.target)} ·
-                            max loss at the stop {money(sizing.max_loss)} · flat by {plan?.flat_by || '15:55'} ET
+                            max loss at the stop {money(sizing.max_loss)} · flat by {plan?.flat_by || '15:55'} {TZ}
                         </div>
                         <div className="mt-3 flex flex-wrap items-end gap-3">
                             <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600 dark:text-slate-300">
@@ -472,8 +492,8 @@ function AlertsView({ clock, permission, onEnable, log, orders, watches }) {
             <h2 className="font-bold text-slate-800 dark:text-white mb-1">Alerts<ToolTag tool="alerts.py" /></h2>
             {clock && (
                 <p className="text-sm mb-3">
-                    NYSE {clock.open ? <b className="text-green-600 dark:text-green-400">open</b> : <b className="text-slate-500">closed</b>} ({clock.reason}) · {clock.date} {clock.opens}–{clock.closes} ET
-                    {clock.early_close && <span className="text-amber-600"> · early close</span>} · next open {clock.next_open}
+                    {TZ === 'IST' ? 'NSE' : 'NYSE'} {clock.open ? <b className="text-green-600 dark:text-green-400">open</b> : <b className="text-slate-500">closed</b>} ({clock.reason}) · {clock.date} {clock.opens}–{clock.closes} {TZ}
+                    {clock.early_close && <span className="text-amber-600"> · early close</span>}{clock.next_open && ` · next open ${clock.next_open}`}
                 </p>
             )}
             <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
@@ -592,6 +612,10 @@ export default function DayTrader() {
     const [theme, setTheme] = useState(savedTheme);
     const dark = theme === 'dark';
     const liveBase = useLiveApiBase();
+    const [market, setMarket] = useState(() => { try { return localStorage.getItem(MARKET_KEY) === 'IN' ? 'IN' : 'US'; } catch { return 'US'; } });
+    setMarketDisplay(market);
+    const sess = SESSIONS[market];
+    const mq = market === 'IN' ? '&market=IN' : '';
     const [desk, setDesk] = useState(null);
     const [source, setSource] = useState(null);
     const [error, setError] = useState(null);
@@ -602,7 +626,7 @@ export default function DayTrader() {
     const [rules, setRules] = useState({ stop: 'or-mid', target: '2R' });
     const [replan, setReplan] = useState(null);       // {plan, timemachine, engine} for non-default rules
     const [replanning, setReplanning] = useState(false);
-    const [settings, setSettings] = useState(loadSettings);
+    const [settings, setSettings] = useState(() => loadSettings(market, market === 'IN' ? INDIA_DEFAULTS : null));
     const [sized, setSized] = useState(null);           // {sizing, risk, engine, error}
     const [orders, setOrders] = useState(loadOrders);
     const [watches, setWatches] = useState([]);
@@ -614,7 +638,8 @@ export default function DayTrader() {
     const load = useCallback(async () => {
         setLoading(true);
         try {
-            const { source: src, body } = await getData('/api/desk', 'daytrader.json');
+            const { source: src, body } = await getData(market === 'IN' ? '/api/desk?market=IN' : '/api/desk',
+                market === 'IN' ? 'daytrader-IN.json' : 'daytrader.json');
             setDesk(body);
             setSource(src);
             setError(null);
@@ -623,7 +648,7 @@ export default function DayTrader() {
         } finally {
             setLoading(false);
         }
-    }, []);
+    }, [market]);
 
     useEffect(() => {
         load();
@@ -631,7 +656,16 @@ export default function DayTrader() {
         return () => clearInterval(id);
     }, [load, liveBase]);
 
-    useEffect(() => { try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch { /* ignore */ } }, [settings]);
+    const switchMarket = (m) => {
+        if (m === market) return;
+        try { localStorage.setItem(MARKET_KEY, m); } catch { /* storage unavailable */ }
+        setDesk(null); setSymbol(null); setBars({}); setReplan(null); setSized(null); setError(null);
+        setSettings(loadSettings(m, m === 'IN' ? INDIA_DEFAULTS : null));
+        setMarket(m);
+        if (m === 'IN' && ['analyst', 'congress'].includes(tab)) setTab('scanner');
+    };
+
+    useEffect(() => { try { localStorage.setItem(settingsKey(market), JSON.stringify(settings)); } catch { /* ignore */ } }, [settings]);
     useEffect(() => saveOrders(orders), [orders]);
 
     const pick = (sym) => { setSymbol(sym); setReplan(null); setRules({ stop: 'or-mid', target: desk?.target_rule || '2R' }); };
@@ -645,7 +679,8 @@ export default function DayTrader() {
     // 5-minute bars for the chosen stock (chart, browser Time Machine, latest price)
     useEffect(() => {
         if (!symbol || !desk) return;
-        const req = source === 'live' ? liveJson(`/api/desk/bars?symbol=${symbol}`) : snapshotJson(`intraday/${symbol}.json`);
+        const req = source === 'live' ? liveJson(`/api/desk/bars?symbol=${encodeURIComponent(symbol)}${mq}`)
+            : snapshotJson(`${market === 'IN' ? 'intraday-IN' : 'intraday'}/${encodeURIComponent(symbol)}.json`);
         req.then(d => setBars(m => ({ ...m, [symbol]: d.bars }))).catch(() => {});
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [symbol, desk?.generated_at, source]);
@@ -662,14 +697,14 @@ export default function DayTrader() {
         (async () => {
             try {
                 if (source === 'live') {
-                    const r = await liveJson(`/api/desk/plan?symbol=${symbol}&target=${rules.target}&stop=${rules.stop}`);
+                    const r = await liveJson(`/api/desk/plan?symbol=${encodeURIComponent(symbol)}&target=${rules.target}&stop=${rules.stop}${mq}`);
                     if (alive) setReplan({ plan: r.plan, timemachine: r.timemachine, engine: 'skill' });
                 } else {
                     const plan = browserPlan(base.plan, rules.stop, rules.target);
                     let timemachine = null;
-                    const k = plan.entry_bar ?? barOfTime(plan.entry_time);   // the replay starts after the entry bar
+                    const k = plan.entry_bar ?? barOfTime(plan.entry_time, sess);   // the replay starts after the entry bar
                     if (symBars?.length && Number.isInteger(k)) {
-                        const { pool, sessions } = buildPool(symBars, plan.date);
+                        const { pool, sessions } = buildPool(symBars, plan.date, sess);
                         const mc = { ...simulate({ pool, entry: plan.entry, stop: plan.stop, target: plan.target, k }), pool_sessions: sessions };
                         const v = tmVerdict(mc);
                         timemachine = { mc, verdict: v.verdict, verdict_notes: v.notes };
@@ -704,7 +739,7 @@ export default function DayTrader() {
         if (!plan) { setSized(null); return undefined; }
         let alive = true;
         const timer = setTimeout(async () => {
-            if (source === 'live') {
+            if (source === 'live' && market === 'US') {    // India: the browser ports (the skill's tools run on New York time)
                 try {
                     const r = await liveJson('/api/desk/size-risk', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ plan, settings }) });
                     const res = r.risk?.results?.[0];
@@ -781,10 +816,12 @@ export default function DayTrader() {
 
     const stale = source === 'snapshot' && desk?.clock?.open && desk?.generated_at && Date.now() - new Date(desk.generated_at).getTime() > 40 * 60000;
     const needsSymbol = !['scanner', 'congress', 'alerts', 'broker'].includes(tab);
+    const usOnly = market === 'IN' && ['analyst', 'congress'].includes(tab);
     const symbolChoices = [...new Set([...(desk?.scan?.hits || []).map(h => h.symbol), ...Object.keys(desk?.plans || {})])];
 
     const view = () => {
         if (!desk) return null;
+        if (usOnly) return <Empty>{tab === 'analyst' ? 'The Earnings Analyst reads SEC filings, so it covers US companies only.' : 'The Congress tracker reads US House disclosures, so it covers US stocks only.'} Switch to 🇺🇸 US above.</Empty>;
         if (needsSymbol && !symbol) return <Empty>Pick a stock in the Scanner first.</Empty>;
         switch (tab) {
             case 'scanner': return <ScannerView desk={desk} symbol={symbol} onPick={pick} onGo={setTab} />;
@@ -814,9 +851,15 @@ export default function DayTrader() {
                         <div className="flex items-center gap-2">
                             {desk?.as_of && (
                                 <span className="hidden md:inline text-[11px] text-slate-500 dark:text-slate-400" title={desk.generated_at && new Date(desk.generated_at).toLocaleString()}>
-                                    As of {desk.as_of} ET{desk.generated_at && ` · built ${ageText(desk.generated_at)}`}
+                                    As of {desk.as_of} {TZ}{desk.generated_at && ` · built ${ageText(desk.generated_at)}`}
                                 </span>
                             )}
+                            <div role="radiogroup" aria-label="Market" className="inline-flex p-0.5 rounded-lg bg-slate-100 dark:bg-surfacebg border border-slate-200 dark:border-borderdark">
+                                {[['US', '🇺🇸 US'], ['IN', '🇮🇳 India']].map(([m, label]) => (
+                                    <button key={m} role="radio" aria-checked={market === m} onClick={() => switchMarket(m)}
+                                        className={`px-2.5 py-1 rounded-md text-xs font-semibold ${market === m ? 'bg-white dark:bg-cardbg text-emerald-700 dark:text-emerald-400 shadow-sm' : 'text-slate-500 dark:text-slate-400'}`}>{label}</button>
+                                ))}
+                            </div>
                             <LiveDataButton source={source} />
                             <button onClick={load} aria-label="Reload data" className="w-8 h-8 flex items-center justify-center rounded-lg border border-slate-200 dark:border-borderdark text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-surfacebg">
                                 <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />

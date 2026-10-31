@@ -20,7 +20,10 @@ const sharesFor = (usd, perShare) => {
     const u = Math.round(usd * 100), p = Math.round(perShare * 100);
     return p <= 0 || u <= 0 ? 0 : Math.floor(u / p);
 };
-const money = (x) => (Math.abs(x - Math.round(x)) < 0.005 ? `$${Math.round(x).toLocaleString('en-US')}` : `$${x.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
+let SYM = '$';
+/** Currency symbol for the messages ($ for the US desk, ₹ for India). */
+export const setCurrencySymbol = (sym) => { SYM = sym; };
+const money = (x) => (Math.abs(x - Math.round(x)) < 0.005 ? `${SYM}${Math.round(x).toLocaleString('en-US')}` : `${SYM}${x.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
 const p2 = (x) => roundCent(x).toFixed(2);
 
 // trader-budget/config.example.json
@@ -130,34 +133,41 @@ export function riskCheck({ sizing, cfg, todayEntries = [], nowHHMM }) {
 
 // ── Time Machine (timemachine.py build_pool / simulate / verdict) ────────────
 
-const SESSION_BARS = 78, COIN_FLIP = 0.05, STRONG = 0.15, MANY_NEITHER = 0.40;
-const etParts = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+const COIN_FLIP = 0.05, STRONG = 0.15, MANY_NEITHER = 0.40;
 
-/** New York {date: 'YYYY-MM-DD', minute: minutes since midnight} of an epoch second. */
-export function nyTime(epoch) {
-    const p = Object.fromEntries(etParts.formatToParts(new Date(epoch * 1000)).map(x => [x.type, x.value]));
+/** Exchange sessions: local time zone, open (minutes after midnight), 5-minute bars per session. */
+export const SESSIONS = {
+    US: { tz: 'America/New_York', tzLabel: 'ET', open: 570, bars: 78 },    // NYSE 9:30-16:00
+    IN: { tz: 'Asia/Kolkata', tzLabel: 'IST', open: 555, bars: 75 },       // NSE 9:15-15:30
+};
+const partsFmt = {};
+
+/** {date: 'YYYY-MM-DD', minute: minutes since midnight} of an epoch second in a time zone. */
+export function localTime(epoch, tz = SESSIONS.US.tz) {
+    partsFmt[tz] ||= new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+    const p = Object.fromEntries(partsFmt[tz].formatToParts(new Date(epoch * 1000)).map(x => [x.type, x.value]));
     return { date: `${p.year}-${p.month}-${p.day}`, minute: Number(p.hour) * 60 + Number(p.minute) };
 }
 
-/** Compact bars → {date: {slot: {o,h,l,c}}}, regular-session 5-minute slots 0..77. */
-export function sessionsOf(bars) {
+/** Compact bars → {date: {slot: {o,h,l,c}}}, regular-session 5-minute slots. */
+export function sessionsOf(bars, sess = SESSIONS.US) {
     const days = {};
     for (const [t, o, h, l, c] of bars) {
-        const { date, minute } = nyTime(t);
-        const slot = (minute - 570) / 5;
-        if (slot >= 0 && slot < SESSION_BARS && Number.isInteger(slot)) (days[date] ||= {})[slot] = { o, h, l, c };
+        const { date, minute } = localTime(t, sess.tz);
+        const slot = (minute - sess.open) / 5;
+        if (slot >= 0 && slot < sess.bars && Number.isInteger(slot)) (days[date] ||= {})[slot] = { o, h, l, c };
     }
     return days;
 }
 
 /** pool[i] = every full past session's bar i as ratios to bar i-1's close (sessions before `beforeDate`). */
-export function buildPool(bars, beforeDate) {
-    const days = sessionsOf(bars);
-    const full = Object.keys(days).sort().filter(d => d < beforeDate && Object.keys(days[d]).length === SESSION_BARS);
-    const pool = Array.from({ length: SESSION_BARS }, () => []);
+export function buildPool(bars, beforeDate, sess = SESSIONS.US) {
+    const days = sessionsOf(bars, sess);
+    const full = Object.keys(days).sort().filter(d => d < beforeDate && Object.keys(days[d]).length === sess.bars);
+    const pool = Array.from({ length: sess.bars }, () => []);
     for (const d of full) {
         const D = days[d];
-        for (let i = 1; i < SESSION_BARS; i++) {
+        for (let i = 1; i < sess.bars; i++) {
             const pc = D[i - 1].c;
             pool[i].push([D[i].o / pc, D[i].h / pc, D[i].l / pc, D[i].c / pc]);
         }
@@ -179,11 +189,12 @@ function rng32(seed) {
 }
 
 /** Replays bars k+1..last from entry; stop checked before target in each bar. */
-export function simulate({ pool, entry, stop, target, k, last = SESSION_BARS - 1, replays = 10000, seed = 19, window = 2 }) {
+export function simulate({ pool, entry, stop, target, k, last = pool.length - 1, replays = 10000, seed = 19, window = 2 }) {
+    const nBars = pool.length;
     const risk = entry - stop, rTarget = Math.round((target - entry) / risk * 1e4) / 1e4;
     const rnd = rng32(seed);
     const pick = (arr) => arr[(rnd() * arr.length) | 0];
-    const slot = (i) => (window === 0 ? i : Math.min(SESSION_BARS - 1, Math.max(1, i + Math.floor(rnd() * (2 * window + 1)) - window)));
+    const slot = (i) => (window === 0 ? i : Math.min(nBars - 1, Math.max(1, i + Math.floor(rnd() * (2 * window + 1)) - window)));
     let tgt = 0, stp = 0, green = 0, sumR = 0;
     const closes = [];
     for (let n = 0; n < replays; n++) {
@@ -231,13 +242,13 @@ export function verdict(mc, until = '4:00 PM') {
     return { verdict: text, notes };
 }
 
-/** Bar index (0..77) whose close is an "H:MM AM/PM" entry time ("10:15 AM" closes the 10:10 bar, index 8). */
-export function barOfTime(text) {
+/** Bar index whose close is an "H:MM AM/PM" entry time (US: "10:15 AM" closes the 10:10 bar, index 8). */
+export function barOfTime(text, sess = SESSIONS.US) {
     const m = /^(\d{1,2}):(\d{2})\s*(AM|PM)$/i.exec(String(text).trim());
     if (!m) return null;
     let h = Number(m[1]) % 12;
     if (m[3].toUpperCase() === 'PM') h += 12;
-    return (h * 60 + Number(m[2]) - 570) / 5 - 1;
+    return (h * 60 + Number(m[2]) - sess.open) / 5 - 1;
 }
 
 // ── paper order book (this browser only) ─────────────────────────────────────

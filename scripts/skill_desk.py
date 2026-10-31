@@ -111,6 +111,11 @@ def read_chart(path):
 
 def compact_bars(chart_text):
     """[[epoch, o, h, l, c, v], ...] from a Yahoo chart, regular-session bars only."""
+    return compact_bars_tz(chart_text, ET, 570, 960)
+
+
+def compact_bars_tz(chart_text, zone, open_min, close_min):
+    """compact_bars for any exchange session (open/close in minutes after local midnight)."""
     res = json.loads(chart_text)['chart']['result'][0]
     q = res['indicators']['quote'][0]
     out = []
@@ -118,9 +123,9 @@ def compact_bars(chart_text):
         o, h, l, c, v = (q[k][i] for k in ('open', 'high', 'low', 'close', 'volume'))
         if c is None or o is None:
             continue
-        et = datetime.fromtimestamp(t, ET)
-        m = et.hour * 60 + et.minute
-        if 570 <= m < 960 and m % 5 == 0:
+        local = datetime.fromtimestamp(t, zone)
+        m = local.hour * 60 + local.minute
+        if open_min <= m < close_min and m % 5 == 0:
             out.append([t, round(o, 4), round(h, 4), round(l, 4), round(c, 4), int(v or 0)])
     return out
 

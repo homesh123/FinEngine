@@ -266,6 +266,38 @@ by hand; no PowerShell was available to run it.
 
 ---
 
+## 6a. After launch (31 Oct)
+
+**PR #1 merged.** The first live run fetched real data (40 desk charts and both screeners), but the Day Trader page
+said "No data snapshot yet". The skill's scanner only runs between 9:50 AM (the first bar after the opening range)
+and 3:30 PM ET (the last entry time), and the run was on a Saturday, so it refused.
+
+**PR #2 (merged):**
+- Outside that window the desk replays a session as of 3:30 PM: the same day after 3:30 (and on weekends), the
+  previous session before 9:50. The page says which session it is showing.
+- A failing scanner or clock no longer blanks the desk.
+- `LTIM` was dropped from the NIFTY list: Yahoo reports it as delisted.
+
+**India desk.** The skill hard-codes NYSE hours, so NSE stocks use `scripts/market_desk.py`: the skill's rules
+with the exchange session as a parameter.
+- **Sessions:**
+  - NSE: 09:15–15:30 IST, 75 bars; entries 09:30–15:00; flat by 15:25; ₹ budget defaults.
+  - NYSE: 9:30–16:00 ET, 78 bars.
+- **Proof the rules are the same:** run with the NYSE session on the skill's recorded TSLA day, the port
+  reproduces the skill draw for draw. That covers the entry, the plan, the Time Machine (29.38 / 25.48 / 45.14 %,
+  bands and history trades identical), and the daily setups (0 mismatches on 500 random series in the tests,
+  3,000 in a one-off check). See `scripts/test_market_desk.py`.
+- **On the page:** a 🇺🇸 US / 🇮🇳 India switch on the Day Trader desk. India panels are marked "NSE port". The
+  Earnings Analyst and Congress tabs are US-only (they read SEC and US House filings). India news is Yahoo
+  headlines only. India budget and risk use the browser ports (the skill's tools run on New York time).
+- **Data:** the snapshot job also writes `daytrader-IN.json` and `intraday-IN/`, and runs every 15 min in NSE
+  hours (03:45–10:00 UTC).
+- **Live API:** `market=IN` on `/api/desk`, `/api/desk/bars` and `/api/desk/plan`.
+
+**Live data for both markets** comes from the live API on the Forex24hr server once it is deployed (section 9). The
+snapshot is the fallback. Moving the API to another server: `deploy/forex24hr/README.md`, "Moving to a new
+server".
+
 ## 7. Commits on the branch
 
 | Commit | What |
@@ -276,6 +308,8 @@ by hand; no PowerShell was available to run it.
 | `57de1e9` | Merge `main` |
 | `4f4c0b1` | New FinEngine logo |
 | `8396321` | Deploy the live API to the Forex24hr server (`C:\FinEngine`) |
+| `a5a8486` | PR #2: fix the empty desk outside 9:50 AM–3:30 PM ET |
+| (PR #3) | India (NSE) desk, live API `market=IN`, server-move guide |
 
 ---
 
@@ -329,7 +363,7 @@ upstream version, update the commit in `vendor/README.md`, and run both test sui
    PR #1: while Pages deploys from the branch, the merge would serve the source
    `index.html` and the site would be blank.
 2. **Merge PR #1**, then check the first workflow run (tests, data step, deploy).
-3. **Deploy the live API** with `deploy/forex24hr/deploy-from-mac.sh`. Or connect
+3. **Deploy the live API** with `deploy/forex24hr/deploy-from-mac.sh` (live data for US and India). Or connect
    a Mac folder to a Claude session via Remote Control and have it run the deploy:
    the Desktop folder was not offered to cloud sessions, so updating the Claude
    app or adding another folder may be needed.
@@ -339,7 +373,8 @@ upstream version, update the commit in `vendor/README.md`, and run both test sui
    `disclaimer.html`, `ocean.html`, `llms.txt`, `robots.txt`, `sitemap.xml`):
    rebrand them for FinEngine, or remove them. The privacy and disclaimer pages
    are legal text written for TradeSagar's service and domains.
-6. Optionally stop the second, racing deployment: once the source is GitHub
+6. If the server ever changes, follow "Moving to a new server" in `deploy/forex24hr/README.md`.
+7. Optionally stop the second, racing deployment: once the source is GitHub
    Actions, the branch build stops by itself.
 
 *Educational only, not financial advice. Most day traders lose money: paper trade first.*

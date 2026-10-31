@@ -9,6 +9,7 @@ on:
   workflow_dispatch:
   schedule:
     - cron: '*/15 13-21 * * 1-5'   # US market hours (UTC): refresh the Day Trader desk
+    - cron: '*/15 3-10 * * 1-5'    # NSE market hours (09:15-15:30 IST = 03:45-10:00 UTC): India desk
     - cron: '20 1 * * *'           # daily: screener fundamentals (US + India) after both markets close
 
 permissions:
