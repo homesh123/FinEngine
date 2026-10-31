@@ -46,10 +46,23 @@ Full record of what was built, validated and still pending: [`docs/2026-10-31-fi
 
 Hosted: the live API runs on the Forex24hr server at `https://app.forex24hr.com/finengine` (see `deploy/forex24hr/README.md`).
 
-## Setup
+## Deployment
 
+Merging to `main` deploys both halves automatically:
+
+| Part | What deploys it | When | Where to check |
+|---|---|---|---|
+| Website + data snapshot (GitHub Pages) | GitHub Actions workflow *Deploy to GitHub Pages* | On every push to `main`, every 15 min in market hours, nightly | Actions tab |
+| Backend live API (Forex24hr server, `C:\FinEngine`) | Server task **FinEngine auto-update** (pulls from GitHub every 5 min) | Within ~5 min of a commit to `main` that changes `scripts/`, `server/`, `vendor/` or `deploy/` (website-only commits don't restart it) | `C:\FinEngine\deployed.json`, `C:\FinEngine\logs\auto-update.log` |
+
+If a backend install fails, the server reinstalls the previous version and skips that commit; the next commit is
+tried as usual. Details: [`deploy/forex24hr/README.md`](deploy/forex24hr/README.md#auto-deploy-every-backend-commit-on-main).
+
+**One-time setup**
 1. Repository **Settings → Pages → Build and deployment → Source: GitHub Actions**.
 2. Push to `main` (or run the *Deploy to GitHub Pages* workflow by hand). The first run publishes the data.
+3. From the Mac on the home network, install the backend once (this also turns on its auto-update):
+   `bash deploy/forex24hr/deploy-from-mac.sh main`. Repeat only when moving to a new server.
 
 ## Local development
 
