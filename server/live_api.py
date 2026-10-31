@@ -75,17 +75,50 @@ cache = TTLCache()
 
 _desk_lock = threading.Lock()
 _desk_dir = {'path': None}          # work folder of the newest desk build (its charts are reused)
+DESK_PREFIX = 'desk-'
+
+
+def _rm(path, tries=3):
+    """rmtree that notices failure: on Windows a file still open (a request reading a chart, an antivirus scan) blocks
+    the delete, and ignore_errors alone silently leaves ~15 MB behind every minute."""
+    for i in range(tries):
+        shutil.rmtree(path, ignore_errors=True)
+        if not os.path.exists(path):
+            return True
+        time.sleep(0.2 * (i + 1))
+    return False
+
+
+def sweep_desks(keep=None, min_age=2 * DESK_TTL):
+    """Delete leftover desk work folders (a failed build, a blocked delete, a restart). Returns how many went."""
+    root, now, n = tempfile.gettempdir(), time.time(), 0
+    for name in os.listdir(root):
+        path = os.path.join(root, name)
+        if not name.startswith(DESK_PREFIX) or path == keep or not os.path.isdir(path):
+            continue
+        try:
+            stale = now - os.path.getmtime(path) >= min_age
+        except OSError:
+            continue
+        if stale and _rm(path, tries=1):
+            n += 1
+    return n
 
 
 def desk():
     """The whole desk, rebuilt from live Yahoo bars at most once a minute."""
     def build():
         with _desk_lock:
-            work = tempfile.mkdtemp(prefix='desk-')
-            doc, bars = skill_desk.build_desk(work, log=lambda *_: None)
+            work = tempfile.mkdtemp(prefix=DESK_PREFIX)
+            try:
+                doc, bars = skill_desk.build_desk(work, log=lambda *_: None)
+            except Exception:
+                _rm(work)                  # a failed build used to leave its half-written folder behind
+                raise
             old, _desk_dir['path'] = _desk_dir['path'], work
             if old:
-                shutil.rmtree(old, ignore_errors=True)
+                _rm(old)
+            sweep_desks(keep=work)
             return dict(doc, generated_at=now_iso(), live=True), bars
     return cache.get(('desk',), DESK_TTL, build)
 
@@ -134,6 +167,7 @@ def chart_path(sym):
     path = os.path.join(_desk_dir['path'], 'charts', f'{sym}.json')
     if not os.path.exists(path):
         text = cache.get(('chart', sym), DESK_TTL, lambda: skill_desk.fetch_chart(sym))
+        os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, 'w', encoding='utf-8') as f:
             f.write(text)
     return path
@@ -338,6 +372,7 @@ def main():
     ap.add_argument('--port', type=int, default=int(os.environ.get('PORT', 8000)))
     ap.add_argument('--warm', action='store_true', help='build the desk and screeners in the background, every minute')
     a = ap.parse_args()
+    print(f'removed {sweep_desks()} leftover desk folders from earlier runs', flush=True)
     if a.warm:
         warm()
     print(f'FinEngine live API on http://{a.host}:{a.port}', flush=True)

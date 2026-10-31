@@ -125,5 +125,54 @@ class LiveApiTest(unittest.TestCase):
         self.assertEqual(e.exception.code, 400)
 
 
+class DeskFolderLeakTest(unittest.TestCase):
+    """Desk work folders must not pile up in the temp dir (they filled the server's C: drive, 4.2 GB in a day)."""
+
+    def setUp(self):
+        import tempfile
+        self.tmp = tempfile.mkdtemp()
+        self.patch = mock.patch('tempfile.tempdir', self.tmp)
+        self.patch.start()
+        live_api._desk_dir['path'] = None
+        live_api.cache._data.clear()
+
+    def tearDown(self):
+        import shutil
+        self.patch.stop()
+        shutil.rmtree(self.tmp, ignore_errors=True)
+        live_api._desk_dir['path'] = None
+        live_api.cache._data.clear()
+
+    def desks(self):
+        return sorted(n for n in os.listdir(self.tmp) if n.startswith(live_api.DESK_PREFIX))
+
+    def test_failed_build_leaves_nothing(self):
+        def boom(work, log=None):
+            os.makedirs(os.path.join(work, 'charts'))
+            raise RuntimeError('yahoo down')
+        with mock.patch.object(skill_desk, 'build_desk', boom):
+            with self.assertRaises(RuntimeError):
+                live_api.desk()
+        self.assertEqual(self.desks(), [])
+
+    def test_rebuilds_keep_only_the_newest(self):
+        with mock.patch.object(skill_desk, 'build_desk', lambda work, log=None: reel_desk(work)):
+            for _ in range(3):
+                live_api.cache._data.clear()
+                live_api.desk()
+        self.assertEqual(self.desks(), [os.path.basename(live_api._desk_dir['path'])])
+
+    def test_sweep_removes_stale_orphans_only(self):
+        import time
+        names = ('desk-old', 'desk-young', 'desk-keep', 'not-a-desk')
+        for n in names:
+            os.makedirs(os.path.join(self.tmp, n, 'charts'))
+        past = time.time() - 3600
+        for n in ('desk-old', 'desk-keep', 'not-a-desk'):
+            os.utime(os.path.join(self.tmp, n), (past, past))
+        self.assertEqual(live_api.sweep_desks(keep=os.path.join(self.tmp, 'desk-keep')), 1)
+        self.assertEqual(sorted(os.listdir(self.tmp)), ['desk-keep', 'desk-young', 'not-a-desk'])
+
+
 if __name__ == '__main__':
     unittest.main()
