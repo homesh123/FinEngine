@@ -170,6 +170,7 @@ function ScannerView({ desk, symbol, onPick, onGo }) {
         <div className="space-y-4">
             <Card>
                 <h2 className="font-bold text-slate-800 dark:text-white">Opening-range breakouts<ToolTag tool="scan.py orb" /></h2>
+                {desk.replay_note && <p className="mt-1 mb-2 text-xs font-semibold text-amber-700 dark:text-amber-400">{desk.replay_note}</p>}
                 <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
                     {scan.scanned ?? 0} charts scanned as of {desk.as_of} ET · range = first {scan.or_minutes || 15} minutes · a hit is the first completed 5-minute bar to close above the range high.
                     {hits.length > 0 && ' Click one to work it.'}

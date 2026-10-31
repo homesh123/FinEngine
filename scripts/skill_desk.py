@@ -135,6 +135,30 @@ def last_bar_close(bar_sets):
     return min(close, now) if close.date() == now.date() else close
 
 
+SCAN_FROM, SCAN_UNTIL = (9, 50), (15, 30)   # first bar after the 15-minute range closes; no_entries_after
+
+
+def desk_clock(when, bar_sets):
+    """The skill's scanner only runs between 9:50 AM (the first bar after the
+    opening range) and 3:30 PM ET (the last time for new entries). Outside that
+    window, replay a session as of 3:30 PM, as its error message suggests:
+    the same day after 3:30, the previous session before 9:50.
+    → (clock for the tools, note for the page or None)"""
+    t = (when.hour, when.minute)
+    if SCAN_FROM <= t <= SCAN_UNTIL:
+        return when, None
+    if t > SCAN_UNTIL:
+        day, why = when.date(), 'after 3:30 PM ET (no new entries)'
+    else:
+        days = sorted({datetime.fromtimestamp(b[0], ET).date() for bars in bar_sets for b in bars})
+        earlier = [d for d in days if d < when.date()]
+        if not earlier:
+            return when, None
+        day, why = earlier[-1], 'before 9:50 AM ET (the opening range is still forming)'
+    replay = datetime(day.year, day.month, day.day, *SCAN_UNTIL, tzinfo=ET)
+    return replay, f"It's {why}: showing {day:%a %d %b}'s session as of 3:30 PM ET."
+
+
 # ── the desk ──────────────────────────────────────────────────────────────────
 
 def _lean_tm(doc):
@@ -210,15 +234,23 @@ def build_desk(cwd, symbols=None, charts=None, now=None, live_sources=True, offl
     if not bars:
         raise ToolError('no charts: ' + '; '.join(errors[:3]))
     when = now or last_bar_close(bars.values())
-    now_txt = when.strftime('%Y-%m-%d %H:%M')
+    clock_at, replay_note = desk_clock(when, bars.values())
+    now_txt = clock_at.strftime('%Y-%m-%d %H:%M')
     have = [s for s in symbols if s in bars]
-    log(f'desk: {len(have)} charts, clock {now_txt} ET')
+    log(f'desk: {len(have)} charts, data to {when:%Y-%m-%d %H:%M} ET, desk clock {now_txt} ET')
 
-    desk = {'as_of': now_txt, 'symbols': have, 'target_rule': TARGET, 'stop_rule': STOP,
+    desk = {'as_of': now_txt, 'data_as_of': when.strftime('%Y-%m-%d %H:%M'), 'replay_note': replay_note, 'symbols': have, 'target_rule': TARGET, 'stop_rule': STOP,
             'config': dict(DEFAULT_CONFIG), 'plans': {}, 'errors': errors}
-    desk['clock'] = run_tool('trader-alerts/alerts.py', ['clock', '--now', now_txt], cwd)
-    desk['scan'] = run_tool('trader-scanner/scan.py', ['orb', '--offline', chart_dir, '--symbols', ','.join(have),
-                                                       '--now', now_txt, '--out', 'trader/watchlist.json'], cwd)
+    try:
+        desk['clock'] = run_tool('trader-alerts/alerts.py', ['clock', '--now', when.strftime('%Y-%m-%d %H:%M')], cwd)
+    except ToolError as e:
+        errors.append(f'clock: {e}')
+    try:    # one failing tool must not blank the whole desk
+        desk['scan'] = run_tool('trader-scanner/scan.py', ['orb', '--offline', chart_dir, '--symbols', ','.join(have),
+                                                           '--now', now_txt, '--out', 'trader/watchlist.json'], cwd)
+    except ToolError as e:
+        errors.append(f'scanner: {e}')
+        desk['scan'] = {'hits': [], 'scanned': 0, 'note': str(e)}
     try:
         args = ['daily', '--symbols', ','.join(have), '--out', 'trader/daily.json']
         desk['daily'] = run_tool('trader-scanner/scan.py', args + ([] if live_sources else ['--offline', chart_dir, '--now', now_txt]), cwd)

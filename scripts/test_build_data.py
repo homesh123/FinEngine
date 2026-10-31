@@ -144,6 +144,33 @@ class SkillDeskTest(unittest.TestCase):
         self.assertTrue(all(b[2] >= b[3] for b in bars))
 
 
+class DeskClockTest(unittest.TestCase):
+    """The skill's scanner refuses to run before 9:50 AM and after the close; the
+    desk replays a session as of 3:30 PM instead (the first live run failed on a Saturday)."""
+
+    def build(self, when):
+        with tempfile.TemporaryDirectory() as work:
+            return _build_desk(work, symbols=['TSLA'], charts={'TSLA': skill_desk.read_chart(REEL_CHART)},
+                               now=when, live_sources=False, log=lambda *_: None)[0]
+
+    def test_after_the_close_replays_the_same_day_at_330(self):
+        desk = self.build(datetime(2026, 10, 16, 16, 0, tzinfo=skill_desk.ET))   # Friday's close, run on the weekend
+        self.assertEqual(desk['as_of'], '2026-10-16 15:30')
+        self.assertEqual(desk['data_as_of'], '2026-10-16 16:00')
+        self.assertIn('after 3:30 PM', desk['replay_note'])
+        self.assertIn('hits', desk['scan'])
+
+    def test_before_950_replays_the_previous_session(self):
+        desk = self.build(datetime(2026, 10, 19, 9, 40, tzinfo=skill_desk.ET))
+        self.assertEqual(desk['as_of'], '2026-10-16 15:30')
+        self.assertIn('before 9:50 AM', desk['replay_note'])
+        self.assertIn('hits', desk['scan'])
+
+    def test_in_the_session_the_clock_is_untouched(self):
+        desk = self.build(REEL_NOW)
+        self.assertEqual((desk['as_of'], desk['replay_note']), ('2026-10-19 10:15', None))
+
+
 class FullBuildTest(unittest.TestCase):
     @mock.patch('yfinance.Ticker', FakeTicker)
     def test_full_build_writes_every_file(self):
