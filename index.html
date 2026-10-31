@@ -11,7 +11,17 @@
     <title>FinEngine - Stock Investment Screener</title>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <p id="boot-hint" style="display:none;font:14px system-ui,sans-serif;max-width:36rem;margin:3rem auto;padding:0 1rem;color:#475569">
+        FinEngine didn't start. If this stays, the site is being published from the repository branch instead of the
+        build: on GitHub open <b>Settings → Pages → Build and deployment → Source</b> and choose <b>GitHub Actions</b>,
+        then reload. Otherwise try a hard reload (Ctrl/Cmd + Shift + R).
+      </p>
+    </div>
+    <script>
+      // React replaces #root when it starts; this only shows if it never does
+      setTimeout(function () { var h = document.getElementById('boot-hint'); if (h) h.style.display = 'block'; }, 6000);
+    </script>
     <script type="module" src="./src/main.jsx"></script>
   </body>
 </html>

@@ -90,7 +90,8 @@ export default function TopPicksPage({ market = 'US', onBack }) {
         clearTimeout(pollRef.current);
         try {
             // Ranked in the browser from the screener data (live prices when connected), with this browser's criteria
-            const { body } = await getData(`/api/investment/screener?market=${market}`, `screener-${market}.json`);
+            const { body } = await getData(`/api/investment/screener?market=${market}`, `screener-${market}.json`,
+                b => Array.isArray(b?.data) && b.data.length > 0);
             setState({ status: 'ready', data: topPicks(body, savedCriteria() || undefined), error: null });
         } catch (e) {
             setState(prev => ({ ...prev, status: 'error', error: e.message }));
