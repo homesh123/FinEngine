@@ -1,0 +1,507 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FinEngine Day Trader Desk</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <!-- PyScript: run Python in the browser -->
+  <link rel="stylesheet" href="https://pyscript.net/releases/2024.1.1/core.css" />
+  <script type="module" src="https://pyscript.net/releases/2024.1.1/core.js"></script>
+  <py-config>
+    packages = ["pandas"]
+  </py-config>
+  <style>
+    #pyscript-loading {
+      position: fixed; inset: 0; z-index: 50;
+      background: #0f1026; color: #fff;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+    }
+    #pyscript-loading.hidden { display: none; }
+    .pulse-dot { width: 8px; height: 8px; background: #10b981; border-radius: 50%;
+      animation: pulse 1.5s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+  </style>
+</head>
+<body class="min-h-screen bg-slate-50 dark:bg-darkbg text-slate-900 dark:text-slate-200 font-sans">
+
+  <!-- PyScript loading overlay -->
+  <div id="pyscript-loading">
+    <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-emerald-500 mb-4"></div>
+    <h2 class="text-lg font-bold mb-2">Initializing Python (PyScript)…</h2>
+    <p class="text-sm text-slate-400 mb-6">Downloading PyScript runtime + pandas. First load takes ~20-40 seconds.</p>
+    <div class="flex gap-2">
+      <div class="pulse-dot"></div><div class="pulse-dot" style="animation-delay:.2s"></div><div class="pulse-dot" style="animation-delay:.4s"></div>
+    </div>
+    <p class="text-xs text-slate-500 mt-6">Once loaded, click "Screen" to fetch live stock data from Yahoo Finance.</p>
+  </div>
+
+  <!-- Header -->
+  <header class="border-b border-slate-200 dark:border-borderdark bg-white dark:bg-cardbg sticky top-0 z-20">
+    <div class="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between gap-4">
+      <div class="flex items-center gap-2">
+        <div class="w-8 h-8 rounded-lg bg-emerald-500 flex items-center justify-center text-white font-bold">D</div>
+        <div>
+          <h1 class="text-xl font-bold text-slate-900 dark:text-white tracking-tight">FinEngine Day Trader</h1>
+          <p class="text-xs text-slate-500 dark:text-slate-400">Live stock screener &mdash; PyScript in the browser</p>
+        </div>
+      </div>
+      <div class="flex items-center gap-2 px-4 py-2 border border-slate-200 dark:border-borderdark rounded-full bg-white dark:bg-cardbg text-sm">
+        <span id="status-indicator" class="flex items-center gap-1 text-emerald-600 dark:text-emerald-400 text-xs font-medium">
+          <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+          PyScript loading…
+        </span>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-6xl mx-auto px-4 py-8 space-y-8">
+
+    <!-- Intro -->
+    <div class="bg-white dark:bg-cardbg rounded-xl border border-slate-200 dark:border-borderdark p-6">
+      <h2 class="text-lg font-bold text-slate-900 dark:text-white mb-4">Day Trader Desk &mdash; Live Screening</h2>
+      <p class="text-sm text-slate-600 dark:text-slate-400 mb-4">
+        Eleven open-source skills (Scanner, News Desk, Entry Timer, Exit Planner, Time Machine, Position Sizer, Risk Manager, Order Desk, Alerts, Earnings Analyst, Congress Tracker). Stock data loads live in your browser via PyScript &mdash; no backend, no API key.
+      </p>
+
+      <!-- Controls -->
+      <div class="flex flex-wrap gap-3 mt-4">
+        <button id="btn-screen-in" class="px-4 py-2 rounded-lg bg-emerald-600 text-white font-medium hover:bg-emerald-700 transition-colors text-sm flex items-center gap-2">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6v16M20 6v16M4 12h16M4 18h16M4 6h16M20 6v10l-4 4M4 12v10l4-4"></path></svg>
+          Screen Indian (NIFTY)
+        </button>
+        <button id="btn-screen-us" class="px-4 py-2 rounded-lg bg-blue-600 text-white font-medium hover:bg-blue-700 transition-colors text-sm flex items-center gap-2">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"></path></svg>
+          Screen US Stocks
+        </button>
+        <button id="btn-clear" class="px-4 py-2 rounded-lg border border-slate-300 dark:border-borderdark text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-900 transition-colors text-sm flex items-center gap-2">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+          Clear
+        </button>
+      </div>
+    </div>
+
+    <!-- Results Table -->
+    <div id="results-panel" class="hidden bg-white dark:bg-cardbg rounded-xl border border-slate-200 dark:border-borderdark overflow-hidden">
+      <div class="p-4 border-b border-slate-200 dark:border-borderdark flex items-center justify-between bg-slate-50 dark:bg-slate-900">
+        <div class="flex items-center gap-2">
+          <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+          <span class="font-semibold text-slate-800 dark:text-white" id="results-title">Screening Results</span>
+        </div>
+        <span id="results-count" class="text-xs font-mono text-slate-500 dark:text-slate-400">0 stocks</span>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead class="bg-slate-50 dark:bg-slate-900/50">
+            <tr>
+              <th class="px-4 py-3 text-left font-medium text-slate-600 dark:text-slate-300">Symbol</th>
+              <th class="px-4 py-3 text-left font-medium text-slate-600 dark:text-slate-300">Price</th>
+              <th class="px-4 py-3 text-left font-medium text-slate-600 dark:text-slate-300">Change %</th>
+              <th class="px-4 py-3 text-left font-medium text-slate-600 dark:text-slate-300">ROE %</th>
+              <th class="px-4 py-3 text-left font-medium text-slate-600 dark:text-slate-300">Rev Growth %</th>
+              <th class="px-4 py-3 text-left font-medium text-slate-600 dark:text-slate-300">F-Score</th>
+              <th class="px-4 py-3 text-left font-medium text-slate-600 dark:text-slate-300">Signal</th>
+            </tr>
+          </thead>
+          <tbody id="results-body" class="divide-y divide-slate-200 dark:divide-borderdark">
+          </tbody>
+        </table>
+      </div>
+      <p id="no-results" class="p-4 text-center text-slate-500 dark:text-slate-400 text-sm">No results yet. Wait for PyScript to load, then click "Screen".</p>
+    </div>
+
+    <!-- Log -->
+    <div id="log-panel" class="hidden bg-slate-900 rounded-lg p-4 font-mono text-xs overflow-y-auto max-h-64">
+      <div class="text-emerald-400 font-bold mb-2">Screener Log</div>
+      <div id="log-content"></div>
+    </div>
+
+  </main>
+
+  <footer class="border-t border-slate-200 dark:border-borderdark bg-white dark:bg-cardbg py-6 mt-12">
+    <div class="max-w-6xl mx-auto px-4 text-center">
+      <p class="text-xs text-slate-500 dark:text-slate-400">
+        FinEngine Day Trader &middot; Day trader skill by Jake Schincariol &middot; MIT licensed &middot;
+        Educational only &mdash; nothing here is financial advice. Day trading is risky and most day traders lose money.
+      </p>
+    </div>
+  </footer>
+
+  <!-- PyScript: browser-side stock screener -->
+  <script type="py">
+import js
+import asyncio
+import json
+import pandas as pd
+from datetime import datetime
+import time as pytime
+from pyodide.ffi import create_proxy
+
+# ---------- UI refs ----------
+log_div = js.document.getElementById("log-content")
+results_body = js.document.getElementById("results-body")
+results_panel = js.document.getElementById("results-panel")
+no_results = js.document.getElementById("no-results")
+status_indicator = js.document.getElementById("status-indicator")
+results_count = js.document.getElementById("results-count")
+results_title = js.document.getElementById("results-title")
+pyscript_loading = js.document.getElementById("pyscript-loading")
+
+# ---------- Stock universes ----------
+NIFTY_SYMBOLS = [
+    "RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "INFY.NS", "HINDUNILVR.NS",
+    "ICICIBANK.NS", "SBIN.NS", "BHARTIARTL.NS", "ITC.NS", "KOTAKBANK.NS",
+    "LT.NS", "ASIANPAINT.NS", "AXISBANK.NS", "BAJFINANCE.NS", "HCLTECH.NS"
+]
+
+US_SYMBOLS = [
+    "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "BRK-B", "JPM",
+    "V", "UNH", "JNJ", "XOM", "PG", "COST", "HD",
+]
+
+DEFAULT_CRITERIA = {
+    "revenue_growth_min": 10.0,
+    "eps_growth_min": 12.0,
+    "roe_min": 15.0,
+    "roic_min": 15.0,
+    "gross_margin_min": 40.0,
+    "debt_to_equity_max": 0.5,
+    "peg_max": 1.5,
+    "f_score_min": 7,
+    "margin_of_safety_min": 20.0,
+}
+
+CURRENCY = {"IN": "INR", "US": "USD"}
+CURRENCY_SYMBOL = {"INR": "₹", "USD": "$"}
+
+# ---------- UI helpers ----------
+def log(msg):
+    ts = datetime.now().strftime("%H:%M:%S")
+    line = f"[{ts}] {msg}\n"
+    current = log_div.innerText if log_div.innerText else ""
+    log_div.innerText = current + line
+    log_div.scrollTop = log_div.scrollHeight
+    print(line, end="")
+
+def set_status(text, kind="info"):
+    status_indicator.innerText = text
+    if kind == "loading":
+        status_indicator.className = "flex items-center gap-1 text-amber-600 dark:text-amber-400 text-xs font-medium"
+    elif kind == "done":
+        status_indicator.className = "flex items-center gap-1 text-emerald-600 dark:text-emerald-400 text-xs font-medium"
+    else:
+        status_indicator.className = "flex items-center gap-1 text-slate-600 dark:text-slate-400 text-xs font-medium"
+
+def show_log_panel():
+    js.document.getElementById("log-panel").classList.remove("hidden")
+
+# ---------- Yahoo Finance fetch via browser ----------
+async def yf_fetch(url, retries=3, backoff=2):
+    last_err = None
+    for attempt in range(retries):
+        try:
+            resp = await js.fetch(url)
+            if resp.ok:
+                return await resp.json()
+            else:
+                last_err = f"HTTP {resp.status}"
+        except Exception as e:
+            last_err = str(e)
+        if attempt < retries - 1:
+            await asyncio.sleep(backoff * (attempt + 1))
+    log(f"  fetch failed after {retries} tries: {last_err} :: {url}")
+    return None
+
+async def get_chart(symbol, range_="1mo", interval="1d"):
+    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range={range_}&interval={interval}"
+    data = await yf_fetch(url)
+    if not data or "chart" not in data or not data["chart"]["result"]:
+        return None
+    result = data["chart"]["result"][0]
+    meta = result.get("meta", {})
+    timestamps = result.get("timestamp", [])
+    indicators = result.get("indicators", {})
+    quote = indicators.get("quote", [{}])[0]
+    closes = quote.get("close", [])
+    highs = quote.get("high", [])
+    lows = quote.get("low", [])
+    opens = quote.get("open", [])
+    volumes = quote.get("volume", [])
+
+    rows = []
+    for i in range(len(timestamps)):
+        rows.append({
+            "time": timestamps[i],
+            "open": opens[i] if i < len(opens) else None,
+            "high": highs[i] if i < len(highs) else None,
+            "low": lows[i] if i < len(lows) else None,
+            "close": closes[i] if i < len(closes) else None,
+            "volume": volumes[i] if i < len(volumes) else None,
+        })
+    return {"meta": meta, "rows": rows}
+
+async def get_quote_summary(symbol):
+    url = f"https://query2.finance.yahoo.com/v10/finance/quoteSummary/{symbol}?modules=defaultKeyStatistics,financialData,summaryDetail,assetProfile"
+    data = await yf_fetch(url)
+    if not data or "quoteSummary" not in data or not data["quoteSummary"]["result"]:
+        return {}
+    return data["quoteSummary"]["result"][0]
+
+# ---------- Indicators ----------
+def calculate_ta(rows):
+    if not rows or len(rows) < 30:
+        return None
+    df = pd.DataFrame(rows)
+    df = df.dropna(subset=["close"])
+    if len(df) < 30:
+        return None
+
+    close = df["close"]
+    high = df["high"]
+    low = df["low"]
+
+    delta = close.diff()
+    gain = delta.where(delta > 0, 0.0).rolling(window=14).mean()
+    loss = (-delta.where(delta < 0, 0.0)).rolling(window=14).mean()
+    rs = gain / loss
+    rsi = 100 - (100 / (1 + rs))
+
+    exp1 = close.ewm(span=12, adjust=False).mean()
+    exp2 = close.ewm(span=26, adjust=False).mean()
+    macd = exp1 - exp2
+    signal = macd.ewm(span=9, adjust=False).mean()
+
+    hl = high - low
+    hc = (high - close.shift()).abs()
+    lc = (low - close.shift()).abs()
+    tr = pd.concat([hl, hc, lc], axis=1).max(axis=1)
+    atr = tr.rolling(window=14).mean()
+
+    sma20 = close.rolling(window=20).mean()
+    sma50 = close.rolling(window=50).mean()
+
+    last = len(df) - 1
+    return {
+        "rsi": float(rsi.iloc[last]) if not pd.isna(rsi.iloc[last]) else None,
+        "macd": float(macd.iloc[last]) if not pd.isna(macd.iloc[last]) else None,
+        "macd_signal": float(signal.iloc[last]) if not pd.isna(signal.iloc[last]) else None,
+        "atr": float(atr.iloc[last]) if not pd.isna(atr.iloc[last]) else None,
+        "sma20": float(sma20.iloc[last]) if not pd.isna(sma20.iloc[last]) else None,
+        "sma50": float(sma50.iloc[last]) if not pd.isna(sma50.iloc[last]) else None,
+        "close": float(close.iloc[last]),
+        "prev_close": float(close.iloc[last-1]) if last >= 1 else None,
+    }
+
+# ---------- Fundamentals ----------
+def extract_fundamentals(summary, currency_code):
+    def get_mod(module, *keys):
+        m = summary.get(module, {})
+        if not isinstance(m, dict):
+            return None
+        for k in keys:
+            v = m.get(k, {})
+            if isinstance(v, dict):
+                return v.get("raw") or v.get("fmt")
+            return v
+        return None
+
+    roe = get_mod("financialData", "returnOnEquity")
+    revenue_growth = get_mod("financialData", "revenueGrowth")
+    earnings_growth = get_mod("financialData", "earningsGrowth")
+    gross_margin = get_mod("financialData", "grossMargins")
+    debt_to_equity = get_mod("defaultKeyStatistics", "debtToEquity")
+    peg_ratio = get_mod("defaultKeyStatistics", "pegRatio")
+    forward_pe = get_mod("defaultKeyStatistics", "forwardPE")
+    target_price = get_mod("financialData", "targetMeanPrice")
+    current_price = get_mod("summaryDetail", "regularMarketPrice")
+    sector = get_mod("assetProfile", "sector")
+    analyst_count = get_mod("financialData", "numberOfAnalystOpinions")
+
+    if roe is not None: roe = roe * 100
+    if revenue_growth is not None: revenue_growth = revenue_growth * 100
+    if earnings_growth is not None: earnings_growth = earnings_growth * 100
+    if gross_margin is not None: gross_margin = gross_margin * 100
+    if debt_to_equity is not None: debt_to_equity = debt_to_equity / 100
+
+    return {
+        "roe": roe,
+        "revenue_growth": revenue_growth,
+        "eps_growth": earnings_growth,
+        "gross_margin": gross_margin,
+        "debt_to_equity": debt_to_equity,
+        "peg_ratio": peg_ratio,
+        "forward_pe": forward_pe,
+        "target_price": target_price,
+        "current_price": current_price,
+        "sector": sector,
+        "analyst_count": analyst_count,
+        "currency": currency_code,
+    }
+
+# ---------- Piotroski F-Score (simplified) ----------
+def calculate_f_score(fundamentals, ta):
+    score = 0
+    if fundamentals.get("roe") and fundamentals["roe"] > 0:
+        score += 1
+    if fundamentals.get("eps_growth") and fundamentals["eps_growth"] > 0:
+        score += 1
+    if fundamentals.get("gross_margin") and fundamentals["gross_margin"] > 0:
+        score += 1
+    d2e = fundamentals.get("debt_to_equity")
+    if d2e is not None and d2e < 50:
+        score += 1
+    if ta and ta.get("close") and ta.get("sma20") and ta["close"] > ta["sma20"]:
+        score += 1
+    if ta and ta.get("rsi") and ta["rsi"] < 70:
+        score += 1
+    return score
+
+def signal_label(fundamentals, ta, f_score):
+    reasons = []
+    score = 0
+    if fundamentals.get("roe") and fundamentals["roe"] > 15:
+        score += 1; reasons.append("ROE strong")
+    if fundamentals.get("revenue_growth") and fundamentals["revenue_growth"] > 10:
+        score += 1; reasons.append("Rev growth+")
+    if f_score >= 4:
+        score += 1; reasons.append("F-score OK")
+    if ta and ta.get("close") and ta.get("sma20") and ta["close"] > ta["sma20"]:
+        score += 1; reasons.append("Above SMA20")
+    if score >= 3:
+        return "BUY", "green", reasons
+    elif score >= 1:
+        return "WATCH", "amber", reasons
+    else:
+        return "AVOID", "red", reasons
+
+# ---------- Main screening ----------
+async def screen_market(market):
+    symbols = NIFTY_SYMBOLS if market == "IN" else US_SYMBOLS
+    currency_code = CURRENCY[market]
+    sym_label = "Indian (NIFTY)" if market == "IN" else "US"
+
+    results_panel.classList.remove("hidden")
+    no_results.classList.add("hidden")
+    results_body.innerHTML = ""
+    show_log_panel()
+    log(f"Starting live screen for {sym_label} ({len(symbols)} stocks) via Yahoo Finance...")
+    set_status("Loading...", "loading")
+
+    results = []
+    for i, symbol in enumerate(symbols):
+        set_status(f"Loading {symbol} ({i+1}/{len(symbols)})...", "loading")
+        log(f"Fetching {symbol}...")
+
+        chart = await get_chart(symbol)
+        summary = await get_quote_summary(symbol)
+
+        if not chart or not chart.get("rows"):
+            log(f"  {symbol}: no chart data, skipping")
+            continue
+
+        ta = calculate_ta(chart["rows"])
+        fundamentals = extract_fundamentals(summary, currency_code)
+        f_score = calculate_f_score(fundamentals, ta)
+        label, label_color, reasons = signal_label(fundamentals, ta, f_score)
+
+        cp = fundamentals.get("current_price") or (ta["close"] if ta else None)
+        change_pct = None
+        if ta and ta.get("close") and ta.get("prev_close") and ta["prev_close"]:
+            change_pct = ((ta["close"] - ta["prev_close"]) / ta["prev_close"]) * 100
+
+        row = {
+            "symbol": symbol,
+            "price": cp,
+            "change_pct": change_pct,
+            "roe": fundamentals.get("roe"),
+            "revenue_growth": fundamentals.get("revenue_growth"),
+            "f_score": f_score,
+            "label": label,
+            "label_color": label_color,
+            "sector": fundamentals.get("sector") or "-",
+            "currency_symbol": CURRENCY_SYMBOL.get(currency_code, "$"),
+            "reasons": reasons,
+        }
+        results.append(row)
+        log(f"  {symbol}: ${cp:.2f} | {label} | F={f_score}")
+        add_result_row(row)
+
+        # Small delay between requests to avoid rate limiting
+        await asyncio.sleep(0.5)
+
+    results.sort(key=lambda r: ({"BUY": 0, "WATCH": 1, "AVOID": 2}.get(r["label"], 9), -(r["roe"] or 0)))
+
+    results_count.innerText = f"{len(results)} stocks screened"
+    results_title.innerText = f"Screening Results &mdash; {sym_label}"
+    set_status(f"Done &mdash; {len(results)} stocks", "done")
+    log(f"Screening complete: {len(results)} stocks evaluated.")
+    print("RESULTS_JSON", json.dumps(results))
+
+def add_result_row(r):
+    change_cls = "text-emerald-600 dark:text-emerald-400" if (r["change_pct"] or 0) >= 0 else "text-rose-600 dark:text-rose-400"
+    change_sign = "+" if (r["change_pct"] or 0) >= 0 else ""
+    label_cls = {
+        "BUY": "bg-emerald-500/10 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400 border border-emerald-500/30",
+        "WATCH": "bg-amber-500/10 text-amber-600 dark:bg-amber-500/20 dark:text-amber-400 border border-amber-500/30",
+        "AVOID": "bg-rose-500/10 text-rose-600 dark:bg-rose-500/20 dark:text-rose-400 border border-rose-500/30",
+    }.get(r["label"], "bg-slate-100 text-slate-500 border border-slate-200")
+
+    price_str = f"{r['currency_symbol']}{r['price']:.2f}" if r["price"] else "N/A"
+    change_str = f"{change_sign}{r['change_pct']:.1f}%" if r["change_pct"] is not None else "N/A"
+    roe_str = f"{r['roe']:.1f}%" if r["roe"] is not None else "N/A"
+    rev_str = f"{r['revenue_growth']:.1f}%" if r["revenue_growth"] is not None else "N/A"
+
+    html = f"""
+    <tr class="hover:bg-slate-50 dark:hover:bg-slate-900/50 transition-colors">
+      <td class="px-4 py-3 font-mono font-medium text-slate-800 dark:text-slate-200">{r['symbol']}</td>
+      <td class="px-4 py-3 text-slate-800 dark:text-slate-200">{price_str}</td>
+      <td class="px-4 py-3 {change_cls} font-medium">{change_str}</td>
+      <td class="px-4 py-3 text-slate-600 dark:text-slate-300">{roe_str}</td>
+      <td class="px-4 py-3 text-slate-600 dark:text-slate-300">{rev_str}</td>
+      <td class="px-4 py-3 font-mono text-slate-600 dark:text-slate-300">{r['f_score']}</td>
+      <td class="px-4 py-3">
+        <span class="px-2 py-1 rounded text-xs font-semibold {label_cls}">{r['label']}</span>
+      </td>
+    </tr>
+    """
+    results_body.insertAdjacentHTML("beforeend", html)
+
+# ---------- Event listeners ----------
+async def on_screen_in(_):
+    await screen_market("IN")
+
+async def on_screen_us(_):
+    await screen_market("US")
+
+async def on_clear(_):
+    results_body.innerHTML = ""
+    results_panel.classList.add("hidden")
+    no_results.classList.remove("hidden")
+    log_div.innerText = ""
+    set_status("Ready")
+    log("Cleared.")
+
+def init():
+    # Hide PyScript loading overlay once runtime is ready
+    pyscript_loading.classList.add("hidden")
+    set_status("Ready")
+    log("Day Trader desk initialized. PyScript runtime loaded.")
+    log("Click 'Screen' to fetch live stock data from Yahoo Finance.")
+
+    btn_in = js.document.getElementById("btn-screen-in")
+    btn_us = js.document.getElementById("btn-screen-us")
+    btn_clear = js.document.getElementById("btn-clear")
+    if btn_in:
+        btn_in.addEventListener("click", create_proxy(on_screen_in))
+    if btn_us:
+        btn_us.addEventListener("click", create_proxy(on_screen_us))
+    if btn_clear:
+        btn_clear.addEventListener("click", create_proxy(on_clear))
+
+init()
+
+  </script>
+
+</body>
+</html>
