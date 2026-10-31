@@ -92,13 +92,13 @@ def chart_path(sym):
     path = os.path.join(_desk_dir['path'], 'charts', f'{sym}.json')
     if not os.path.exists(path):
         text = cache.get(('chart', sym), DESK_TTL, lambda: skill_desk.fetch_chart(sym))
-        with open(path, 'w') as f:
+        with open(path, 'w', encoding='utf-8') as f:
             f.write(text)
     return path
 
 
 def desk_bars(sym):
-    with open(chart_path(sym)) as f:
+    with open(chart_path(sym), encoding='utf-8') as f:
         return skill_desk.compact_bars(f.read())
 
 
@@ -271,11 +271,27 @@ class Handler(BaseHTTPRequestHandler):
         sys.stderr.write('%s %s\n' % (self.log_date_time_string(), fmt % args))
 
 
+def warm(every=DESK_TTL - 5):
+    """Keep the desk and the screeners built in the background, so requests answer at once."""
+    def loop():
+        while True:
+            for name, job in (('desk', desk), ('screener US', lambda: screener_rows('US')), ('screener IN', lambda: screener_rows('IN'))):
+                try:
+                    job()
+                except Exception as e:      # an outage must not stop the loop
+                    print(f'warm {name}: {e}', file=sys.stderr, flush=True)
+            time.sleep(every)
+    threading.Thread(target=loop, daemon=True, name='warm').start()
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--host', default='0.0.0.0')
     ap.add_argument('--port', type=int, default=int(os.environ.get('PORT', 8000)))
+    ap.add_argument('--warm', action='store_true', help='build the desk and screeners in the background, every minute')
     a = ap.parse_args()
+    if a.warm:
+        warm()
     print(f'FinEngine live API on http://{a.host}:{a.port}', flush=True)
     ThreadingHTTPServer((a.host, a.port), Handler).serve_forever()
 

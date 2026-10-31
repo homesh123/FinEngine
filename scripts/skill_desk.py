@@ -65,9 +65,10 @@ def sec_user_agent():
 def run_tool(tool, args, cwd, timeout=240):
     """Run one skill tool with --json and return its parsed output. Exit code 1
     means "nothing found" for several tools, so the JSON on stdout decides."""
-    env = dict(os.environ, SEC_USER_AGENT=sec_user_agent(), PYTHONIOENCODING='utf-8')
+    # UTF-8 mode: on Windows the default code page (cp1252) can't hold every headline
+    env = dict(os.environ, SEC_USER_AGENT=sec_user_agent(), PYTHONIOENCODING='utf-8', PYTHONUTF8='1')
     p = subprocess.run([sys.executable, os.path.join(SKILL, tool), *args, '--json'], cwd=cwd, env=env,
-                       capture_output=True, text=True, timeout=timeout)
+                       capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=timeout)
     try:
         return json.loads(p.stdout)
     except ValueError:
@@ -78,7 +79,7 @@ def run_tool(tool, args, cwd, timeout=240):
 def write_config(cwd, overrides=None):
     os.makedirs(os.path.join(cwd, 'trader', 'state'), exist_ok=True)
     cfg = dict(DEFAULT_CONFIG, sec_user_agent=sec_user_agent(), **(overrides or {}))
-    with open(os.path.join(cwd, 'trader', 'config.json'), 'w') as f:
+    with open(os.path.join(cwd, 'trader', 'config.json'), 'w', encoding='utf-8') as f:
         json.dump(cfg, f)
     return cfg
 
@@ -104,7 +105,7 @@ def fetch_chart(sym):
 
 
 def read_chart(path):
-    with (gzip.open if path.endswith('.gz') else open)(path, 'rt') as f:
+    with (gzip.open if path.endswith('.gz') else open)(path, 'rt', encoding='utf-8') as f:
         return f.read()
 
 
@@ -201,7 +202,7 @@ def build_desk(cwd, symbols=None, charts=None, now=None, live_sources=True, offl
     for sym in symbols:
         try:
             text = charts[sym] if charts is not None else fetch_chart(sym)
-            with open(os.path.join(chart_dir, f'{sym}.json'), 'w') as f:
+            with open(os.path.join(chart_dir, f'{sym}.json'), 'w', encoding='utf-8') as f:
                 f.write(text)
             bars[sym] = compact_bars(text)
         except Exception as e:
@@ -261,7 +262,7 @@ def size_and_check(cwd, plan, settings, now_txt=None):
     limits. → {'sizing': ..., 'orders': ..., 'risk': ...}"""
     allowed = {k: settings[k] for k in DEFAULT_CONFIG if k in settings}
     write_config(cwd, allowed)
-    with open(os.path.join(cwd, 'trader', 'plan.json'), 'w') as f:
+    with open(os.path.join(cwd, 'trader', 'plan.json'), 'w', encoding='utf-8') as f:
         json.dump(plan, f)
     clock = ['--now', now_txt] if now_txt else []
     sized = run_tool('trader-budget/size.py', ['--write', *clock], cwd)

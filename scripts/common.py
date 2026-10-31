@@ -55,14 +55,14 @@ def num(v, digits=None):
 def write_json(path, data):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = path + '.tmp'
-    with open(tmp, 'w') as f:
+    with open(tmp, 'w', encoding='utf-8') as f:
         json.dump(data, f, separators=(',', ':'), allow_nan=False, default=str)
     os.replace(tmp, path)
 
 
 def read_json(path, default=None):
     try:
-        with open(path) as f:
+        with open(path, encoding='utf-8') as f:
             return json.load(f)
     except (OSError, ValueError):
         return default
