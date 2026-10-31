@@ -3,7 +3,7 @@ import ChartLinkButton from './ChartLinkButton';
 import MiniStockChart from './MiniStockChart';
 import { ArrowLeft, RefreshCw, Trophy, Eye, ChevronDown, ChevronRight, AlertTriangle } from 'lucide-react';
 import { formatMoney } from '../utils/money';
-import { hasLiveApi, liveJson, snapshotJson } from '../utils/dataSource';
+import { getData } from '../utils/dataSource';
 import { savedCriteria, topPicks } from '../utils/screenerRules';
 
 const pct = (v) => `${v > 0 ? '+' : ''}${Number(v).toFixed(1)}%`;
@@ -89,18 +89,9 @@ export default function TopPicksPage({ market = 'US', onBack }) {
     const load = useCallback(async (refresh = false) => {
         clearTimeout(pollRef.current);
         try {
-            if (!hasLiveApi()) {
-                // Static site: rank the published screener snapshot in the browser
-                const snap = await snapshotJson(`screener-${market}.json`);
-                setState({ status: 'ready', data: topPicks(snap, savedCriteria() || undefined), error: null });
-                return;
-            }
-            const params = new URLSearchParams({ market });
-            if (refresh) params.set('refresh', 'true');
-            const body = await liveJson(`/api/investment/top-picks?${params}`);
-            setState({ status: body.status, data: body.data, error: null });
-            // The scan runs in the background (~1–2 min) — poll until it's done
-            if (body.status === 'computing') pollRef.current = setTimeout(() => load(false), 5000);
+            // Ranked in the browser from the screener data (live prices when connected), with this browser's criteria
+            const { body } = await getData(`/api/investment/screener?market=${market}`, `screener-${market}.json`);
+            setState({ status: 'ready', data: topPicks(body, savedCriteria() || undefined), error: null });
         } catch (e) {
             setState(prev => ({ ...prev, status: 'error', error: e.message }));
         }

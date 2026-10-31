@@ -16,7 +16,18 @@ Yahoo Finance, SEC EDGAR and the House Clerk don't send CORS headers, so a page 
 
 GitHub's scheduler can run late, and Yahoo's prices are delayed. Treat the desk as near-real-time, not tick-by-tick. GitHub also pauses scheduled workflows after 60 days with no repository activity.
 
-Optional: build with `VITE_API_BASE=https://your-backend` to call a live backend that serves `/api/investment/*` (it must send `Access-Control-Allow-Origin` for this site). The snapshot remains the fallback.
+## Live data
+
+For live prices, run the FinEngine live API on any server you control. It fetches from Yahoo server-side and adds CORS headers:
+
+```bash
+pip install -r scripts/requirements.txt
+python server/live_api.py --port 8000        # honours $PORT (Render, Fly.io, Railway…)
+```
+
+Then click **Snapshot** in the site header and paste the server's HTTPS URL (it's saved in your browser). You can also bake it in at build time with `VITE_API_BASE`. Fundamentals are cached for 12 hours and prices for 60 seconds. The screener refreshes every minute and applies your criteria to the live prices. If the server is unreachable, the site falls back to the snapshot.
+
+Limits: GitHub Pages can't run a server, so the live API has to be hosted somewhere else. Yahoo's free data is delayed for some exchanges and is unofficial (it can rate-limit or change without notice).
 
 ## Setup
 

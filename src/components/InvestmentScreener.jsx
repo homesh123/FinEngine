@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import ChartLinkButton from './ChartLinkButton';
 import MiniStockChart from './MiniStockChart';
-import { Settings2, RefreshCw, AlertCircle, Trophy } from 'lucide-react';
+import { Settings2, RefreshCw, AlertCircle, Trophy, Zap, ArrowRight } from 'lucide-react';
 import CriteriaConfigModal from './CriteriaConfigModal';
 import InfoTip from './InfoTip';
 import TopPicksPage from './TopPicksPage';
 import { formatMoney } from '../utils/money';
 import { ageText, getData, hasLiveApi, liveJson } from '../utils/dataSource';
+import { useLiveApiBase } from './LiveDataButton';
 import { applyCriteria, DEFAULT_CRITERIA, savedCriteria } from '../utils/screenerRules';
 
 // Plain-language explanations shown behind the (i) icons. They describe exactly
@@ -116,6 +117,27 @@ function AnalystTarget({ stock }) {
     );
 }
 
+// The stock passes the required criteria (ROE, F-Score, margin of safety); timing only decides BUY vs BUY ON DIP
+const passesCriteria = (stock) => stock.investment_status?.startsWith('BUY');
+const LIVE_REFRESH_MS = 60000;
+
+// Entry to the Day Trader desk from the main screen
+function DayTraderBanner() {
+    return (
+        <a href="./#daytrader"
+           className="mb-4 md:mb-6 flex items-center justify-between gap-3 rounded-xl border border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/10 px-4 py-3 hover:border-emerald-400 transition-colors">
+            <span className="flex items-center gap-3 min-w-0">
+                <span className="w-9 h-9 shrink-0 rounded-lg bg-emerald-600 text-white flex items-center justify-center"><Zap size={18} /></span>
+                <span className="min-w-0">
+                    <span className="block font-bold text-slate-800 dark:text-white">Day Trader desk</span>
+                    <span className="block text-xs text-slate-600 dark:text-slate-300 truncate">Scanner, news, entry timer, exit plan, 10,000-replay Time Machine, sizing, risk checks and paper orders</span>
+                </span>
+            </span>
+            <span className="shrink-0 inline-flex items-center gap-1 text-sm font-semibold text-emerald-700 dark:text-emerald-400">Open <ArrowRight size={15} /></span>
+        </a>
+    );
+}
+
 const hasMos = (stock) => typeof stock.margin_of_safety === 'number';
 const mosText = (stock) =>
     hasMos(stock) ? `${stock.margin_of_safety > 0 ? '+' : ''}${stock.margin_of_safety.toFixed(1)}%` : 'N/A';
@@ -136,7 +158,7 @@ function AgentTag({ stock, compact }) {
     );
 }
 
-export default function InvestmentScreener() {
+export default function InvestmentScreener({ onSource }) {
     const [stocks, setStocks] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
@@ -174,7 +196,17 @@ export default function InvestmentScreener() {
         return () => window.removeEventListener('popstate', onPop);
     }, []);
     const [criteria, setCriteria] = useState(() => savedCriteria() || DEFAULT_CRITERIA);
-    const [snapshotAt, setSnapshotAt] = useState(null);   // when the published snapshot was built
+    const [snapshotAt, setSnapshotAt] = useState(null);   // when the data was built (snapshot) or fetched (live)
+    const [source, setSource] = useState(null);           // 'live' | 'snapshot'
+    const liveBase = useLiveApiBase();
+    // Show only the stocks that pass the criteria (remembered per browser)
+    const [onlyPassing, setOnlyPassing] = useState(() => {
+        try { return localStorage.getItem('screenerOnlyPassing') !== 'false'; } catch { return true; }
+    });
+    const toggleOnlyPassing = (v) => {
+        setOnlyPassing(v);
+        try { localStorage.setItem('screenerOnlyPassing', String(v)); } catch { /* storage unavailable */ }
+    };
     const [searchQuery, setSearchQuery] = useState("");
     const [agentOnly, setAgentOnly] = useState(false);
     const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -187,14 +219,11 @@ export default function InvestmentScreener() {
         setError(null);
         try {
             const { source, body } = await getData(`/api/investment/screener?market=${market}`, `screener-${market}.json`);
-            const rows = body.data || [];
-            // The snapshot has raw metrics only; statuses come from the criteria saved in this browser
-            setStocks(source === 'live' ? rows : rows.map(s => applyCriteria(s, crit)));
-            setSnapshotAt(source === 'live' ? null : body.generated_at);
-            if (source === 'live') {
-                const critData = await liveJson('/api/investment/criteria').catch(() => null);
-                if (critData) setCriteria(critData);
-            }
+            // Live or snapshot, rows carry raw metrics; statuses come from the criteria saved in this browser
+            setStocks((body.data || []).map(s => applyCriteria(s, crit)));
+            setSnapshotAt(body.generated_at);
+            setSource(source);
+            onSource?.(source);
         } catch (err) {
             setStocks([]);
             setError(err.message);
@@ -209,9 +238,10 @@ export default function InvestmentScreener() {
         setError(null);
         try {
             if (!hasLiveApi()) {
-                throw new Error(`${symbol.toUpperCase()} isn't in the published snapshot. Analysing any symbol on demand needs a live backend (set VITE_API_BASE) — add it to the universe in scripts/screener.py to include it in the snapshot.`);
+                throw new Error(`${symbol.toUpperCase()} isn't in the published snapshot. Analysing any symbol on demand needs live data (the "Snapshot" button at the top) — or add it to the universe in scripts/screener.py.`);
             }
             const data = await liveJson(`/api/investment/analyze/${encodeURIComponent(symbol.toUpperCase())}?market=${market}`);
+            data.data = applyCriteria(data.data, criteria);
             
             // Check if already in list and update, otherwise add
             setStocks(prev => {
@@ -234,7 +264,15 @@ export default function InvestmentScreener() {
     useEffect(() => {
         fetchScreenerData();
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [market]);
+    }, [market, liveBase]);
+
+    // Live data: refresh prices every minute (the server caches fundamentals, so this is cheap)
+    useEffect(() => {
+        if (source !== 'live') return undefined;
+        const id = setInterval(() => fetchScreenerData(), LIVE_REFRESH_MS);
+        return () => clearInterval(id);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [source, market, criteria]);
 
     useEffect(() => {
         if (!searchQuery || searchQuery.length < 2) {
@@ -281,12 +319,15 @@ export default function InvestmentScreener() {
         return 'text-amber-600 bg-amber-100 dark:bg-amber-900/30 dark:text-amber-400';
     };
 
+    const passingCount = stocks.filter(passesCriteria).length;
     const filteredStocks = stocks.filter((stock) =>
-        (!agentOnly || stock.agent?.suggested) && (
+        (!agentOnly || stock.agent?.suggested) && (!onlyPassing || searchQuery || passesCriteria(stock)) && (
         stock.symbol.toLowerCase().includes(searchQuery.toLowerCase()) ||
         (stock.name || '').toLowerCase().includes(searchQuery.toLowerCase()))
     );
     const agentCount = stocks.filter(s => s.agent?.suggested).length;
+    const emptyText = stocks.length === 0 ? 'No stocks loaded.'
+        : `None of the ${stocks.length} stocks passes your criteria right now. Untick "Only stocks that pass my criteria" to see them all, or loosen the criteria.`;
 
     if (showTopPicks) {
         return (
@@ -299,13 +340,23 @@ export default function InvestmentScreener() {
     return (
         <div className="flex-1 overflow-auto bg-white dark:bg-darkbg p-3 md:p-6">
             <div className="w-full">
+                <DayTraderBanner />
                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-4 md:mb-6">
                     <div className="flex flex-col gap-2">
                         <h1 className="text-xl md:text-2xl font-bold text-slate-800 dark:text-slate-100">Stock Investment Screener</h1>
                         {snapshotAt && (
                             <p className="text-[11px] text-slate-500 dark:text-slate-400" title={new Date(snapshotAt).toLocaleString()}>
-                                Data snapshot from {ageText(snapshotAt)} · refreshed daily by GitHub Actions from Yahoo Finance
+                                {source === 'live'
+                                    ? <>Live prices · updated {ageText(snapshotAt)} · refreshes every minute</>
+                                    : <>Data snapshot from {ageText(snapshotAt)} · refreshed daily by GitHub Actions from Yahoo Finance</>}
                             </p>
+                        )}
+                        {stocks.length > 0 && (
+                            <label className="inline-flex items-center gap-2 self-start text-xs text-slate-600 dark:text-slate-300 cursor-pointer">
+                                <input type="checkbox" checked={onlyPassing} onChange={e => toggleOnlyPassing(e.target.checked)} className="w-3.5 h-3.5 accent-indigo-600" />
+                                Only stocks that pass my criteria
+                                <span className="text-slate-400">({passingCount} of {stocks.length} pass · ROE ≥ {criteria.roe_min}%, F-Score ≥ {criteria.f_score_min}, margin of safety ≥ {criteria.margin_of_safety_min}%)</span>
+                            </label>
                         )}
                         {/* Market toggle */}
                         <div role="radiogroup" aria-label="Market" className="inline-flex self-start p-0.5 rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
@@ -434,10 +485,10 @@ export default function InvestmentScreener() {
                                         <td colSpan="6" className="p-8 text-center text-slate-500">Loading screener data...</td>
                                     </tr>
                                 ) : (() => {
-                                    if (filteredStocks.length === 0 && stocks.length === 0 && !searchQuery) {
+                                    if (filteredStocks.length === 0 && !searchQuery) {
                                         return (
                                             <tr>
-                                                <td colSpan="6" className="p-8 text-center text-slate-500">No stocks match the current criteria.</td>
+                                                <td colSpan="6" className="p-8 text-center text-slate-500">{emptyText}</td>
                                             </tr>
                                         );
                                     }
@@ -522,8 +573,8 @@ export default function InvestmentScreener() {
                 <div className="md:hidden flex flex-col gap-3">
                     {loading && stocks.length === 0 ? (
                         <div className="p-8 text-center text-slate-500">Loading screener data...</div>
-                    ) : filteredStocks.length === 0 && stocks.length === 0 && !searchQuery ? (
-                        <div className="p-8 text-center text-slate-500">No stocks match the current criteria.</div>
+                    ) : filteredStocks.length === 0 && !searchQuery ? (
+                        <div className="p-8 text-center text-slate-500">{emptyText}</div>
                     ) : filteredStocks.length === 0 ? (
                         <div className="p-8 text-center bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800">
                             <p className="text-slate-500 mb-4">No stocks in the default list match "{searchQuery}".</p>

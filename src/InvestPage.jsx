@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Zap, Sun, Moon } from 'lucide-react';
 import InvestmentScreener from './components/InvestmentScreener';
+import LiveDataButton from './components/LiveDataButton';
 
 // Theme saved by the chart app (default dark)
 function savedTheme() {
@@ -17,6 +18,7 @@ function savedTheme() {
 export default function InvestPage() {
     const [theme, setTheme] = useState(savedTheme);
     const dark = theme === 'dark';
+    const [source, setSource] = useState(null);
 
     return (
         <div className={dark ? 'dark' : ''}>
@@ -24,6 +26,7 @@ export default function InvestPage() {
                 <header className="shrink-0 flex items-center justify-between gap-3 px-3 md:px-6 h-12 border-b border-slate-200 dark:border-borderdark bg-white dark:bg-cardbg">
                     <a href="./" className="flex items-center gap-2 font-brand text-lg font-semibold tracking-[-0.02em] text-slate-900 dark:text-white"><img src="./logo-light.svg" alt="" width="24" height="24" className="dark:hidden" /><img src="./logo.svg" alt="" width="24" height="24" className="hidden dark:block" /><span>Fin<span className="text-emerald-600 dark:text-emerald-400">Engine</span></span></a>
                     <div className="flex items-center gap-2">
+                        <LiveDataButton source={source} />
                         <button
                             onClick={() => setTheme(dark ? 'light' : 'dark')}
                             aria-label={dark ? 'Switch to light theme' : 'Switch to dark theme'}
@@ -40,7 +43,7 @@ export default function InvestPage() {
                     </div>
                 </header>
                 <main className="flex-1 min-h-0 flex flex-col">
-                    <InvestmentScreener />
+                    <InvestmentScreener onSource={setSource} />
                 </main>
             </div>
         </div>

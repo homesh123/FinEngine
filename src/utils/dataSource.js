@@ -5,17 +5,42 @@
 // (scripts/build_data.py) fetches the data server-side and publishes JSON
 // snapshots under ./data/ next to the site — same origin, no CORS.
 //
-// Optional: set VITE_API_BASE at build time to a backend that serves the
-// /api/investment/* endpoints (it must send Access-Control-Allow-Origin for
-// this site). Live calls are tried first and the snapshot is the fallback.
+// Live data: server/live_api.py (or any backend serving the same /api/*
+// endpoints with Access-Control-Allow-Origin) fetches fresh prices for the
+// browser. Its URL comes from the "Live data" setting (saved in this browser)
+// or VITE_API_BASE at build time. Live calls are tried first and the snapshot
+// is the fallback.
 
-export const API_BASE = (import.meta.env.VITE_API_BASE || '').replace(/\/+$/, '');
+const LIVE_KEY = 'liveApiBase';
 const DATA_BASE = `${import.meta.env.BASE_URL}data`;
+const clean = (u) => String(u || '').trim().replace(/\/+$/, '');
 
-export const hasLiveApi = () => !!API_BASE;
+export function getApiBase() {
+    try {
+        const saved = localStorage.getItem(LIVE_KEY);
+        if (saved !== null) return clean(saved);   // '' = user switched live data off
+    } catch { /* storage unavailable */ }
+    return clean(import.meta.env.VITE_API_BASE);
+}
+
+export function setApiBase(url) {
+    try { localStorage.setItem(LIVE_KEY, clean(url)); } catch { /* storage unavailable */ }
+    window.dispatchEvent(new Event('live-api-changed'));
+}
+
+export const hasLiveApi = () => !!getApiBase();
+
+/** GET /api/health on a candidate URL: resolves true, or throws with the reason. */
+export async function testApiBase(url) {
+    const res = await fetch(`${clean(url)}/api/health`, { cache: 'no-store' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const body = await res.json();
+    if (!body.ok) throw new Error('Unexpected answer');
+    return true;
+}
 
 export async function liveJson(path, init) {
-    const res = await fetch(`${API_BASE}${path}`, { cache: 'no-store', ...init });
+    const res = await fetch(`${getApiBase()}${path}`, { cache: 'no-store', ...init });
     const body = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(body.detail || `${path}: HTTP ${res.status}`);
     return body;
@@ -30,7 +55,7 @@ export async function snapshotJson(file) {
 
 /** Live API when configured (falling back to the snapshot on any error), else the snapshot. */
 export async function getData(apiPath, file) {
-    if (API_BASE && apiPath) {
+    if (hasLiveApi() && apiPath) {
         try { return { source: 'live', body: await liveJson(apiPath) }; }
         catch (e) { console.warn(`Live API failed, using snapshot: ${e.message}`); }
     }
