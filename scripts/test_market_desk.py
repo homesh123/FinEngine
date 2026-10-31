@@ -92,6 +92,14 @@ class SkillParityTest(unittest.TestCase):
             self.assertEqual(sorted(md.daily_setups(c)), sorted(scan.find_setups(c)[0]))
 
 
+class ChartUrlTest(unittest.TestCase):
+    def test_nse_symbols_keep_their_suffix(self):
+        # The first live run failed: the skill's fetcher turns '.' into '-' (RELIANCE.NS → RELIANCE-NS, 404)
+        self.assertEqual(md.chart_url('RELIANCE.NS'), 'https://query2.finance.yahoo.com/v8/finance/chart/RELIANCE.NS?range=60d&interval=5m')
+        self.assertIn('/chart/M%26M.NS?', md.chart_url('M&M.NS', 'query1'))
+        self.assertIn('/chart/BAJAJ-AUTO.NS?', md.chart_url('BAJAJ-AUTO.NS'))
+
+
 class IndiaDeskTest(unittest.TestCase):
     def build(self, when):
         return md.build_india_desk(symbols=['TSLA'], charts={'TSLA': as_nse(REEL_TEXT)}, now=when, news=False,
