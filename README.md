@@ -42,6 +42,8 @@ Limits:
 - The skill plans longs only (opening-range breakouts), and its Order Desk never sends orders to a broker; neither does FinEngine (paper only).
 - Congress covers the House only (Senate filings require accepting an agreement by hand).
 
+Full record of what was built, validated and still pending: [`docs/2026-10-31-finengine-work-log.md`](docs/2026-10-31-finengine-work-log.md).
+
 Hosted: the live API runs on the Forex24hr server at `https://app.forex24hr.com/finengine` (see `deploy/forex24hr/README.md`).
 
 ## Setup
