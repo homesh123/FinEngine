@@ -167,7 +167,8 @@ try {
     }
     if (-not $changed) { throw "No nginx server block with server_name $PublicHost found in $confDir" }
     Push-Location $NginxDir
-    $test = & .\nginx.exe -t 2>&1
+    # through cmd: nginx prints "syntax is ok" on stderr, which PowerShell turns into a terminating error under 'Stop'
+    $test = cmd /c "nginx.exe -t 2>&1"
     $testOk = $LASTEXITCODE -eq 0
     Pop-Location
     $test | ForEach-Object { Write-Host $_ }
